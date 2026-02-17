@@ -75,8 +75,12 @@ class TTTGame:
         self.o_username  = None
         self.match_score = {'X': 0, 'O': 0}
         self.round       = 1
+        self.over        = False   # ← FIX: lock flag prevents double-processing
 
     def make_move(self, index, mark):
+        # FIX: Reject moves if game is already over (guards against race conditions)
+        if self.over:
+            return False, None, False, None, None
         if self.turn != mark or self.board[index] is not None:
             return False, None, False, None, None
 
@@ -112,6 +116,7 @@ class TTTGame:
         self.move_order.append((mark, index))
 
         if win_line:
+            self.over = True   # ← FIX: lock the game immediately on win
             return True, removed_index, True, mark, win_line
 
         self.turn = 'O' if mark == 'X' else 'X'
@@ -127,6 +132,7 @@ class TTTGame:
         self.board      = [None] * 9
         self.move_order = []
         self.turn       = 'X'
+        self.over       = False   # ← FIX: reset lock for next round
         self.round     += 1
 
     def get_opponent(self, player_id):
@@ -209,6 +215,11 @@ def handle_make_move(data):
         return
 
     game = games[game_id]
+
+    # FIX: Reject if game already locked (race condition guard)
+    if game.over:
+        return
+
     mark = game.get_mark(player_id)
 
     success, removed_index, game_over, winner, win_line = game.make_move(index, mark)
@@ -236,10 +247,16 @@ def handle_timeout(data):
     player_id = request.sid
 
     if game_id not in games:
-        return  # Already handled (e.g. other player also timed out)
+        return
 
-    game   = games[game_id]
-    mark   = game.get_mark(player_id)
+    game = games[game_id]
+
+    # FIX: If game is already over (win was processed just before timeout arrived),
+    # silently ignore the timeout — prevents double game_over events
+    if game.over:
+        return
+
+    mark = game.get_mark(player_id)
 
     # Only the player whose turn it is can time out
     if game.turn != mark:
@@ -247,7 +264,8 @@ def handle_timeout(data):
 
     winner = 'O' if mark == 'X' else 'X'
 
-    # Delete game immediately to prevent double-timeout
+    # FIX: Lock game BEFORE deleting to prevent any other handler from racing in
+    game.over = True
     del games[game_id]
 
     game.match_score[winner] += 1

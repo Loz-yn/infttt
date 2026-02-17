@@ -882,7 +882,7 @@
 
     <!-- HEADER -->
     <header class="site-header">
-        <div class="logo">∞ TTT<span class="version-tag">v1.6</span></div>
+        <div class="logo">∞ TTT<span class="version-tag">v1.7</span></div>
         <div class="header-btns" id="headerBtns" style="display:none">
             <button class="btn primary" onclick="showLeaderboard()">Leaderboard</button>
             <button class="btn" onclick="logout()">Logout</button>
@@ -1055,6 +1055,10 @@
     let isChatMinimized = false;
     let unreadCount = 0;
 
+    // FIX: Guard flag — once a round ends, ignore any further move_made events for that round.
+    // This prevents duplicate game_over handling from racing timeout vs. win events.
+    let roundOver = false;
+
     // Match state (Best of 3)
     const MATCH_WINS_NEEDED = 2;
     let matchScore = { X: 0, O: 0 };
@@ -1148,6 +1152,7 @@
         myMark       = data.mark;
         opponentName = data.opponent_name || 'Opponent';
         isMyTurn     = data.first_turn === myMark;
+        roundOver    = false;   // FIX: clear round-over guard for new round
 
         // Reset match score on fresh game
         if (data.new_match) {
@@ -1203,20 +1208,16 @@
 
     // ── CLICK HANDLER ────────────────────────────────────────────
     function handleCellClick(index) {
-        if (!gameId || !isMyTurn) return;
+        if (!gameId || !isMyTurn || roundOver) return;   // FIX: guard roundOver
         if (board[index]) return;
 
-        // Update state immediately — syncMove will re-confirm from server
-        // but we need board[] set NOW to block double-clicks
         const myPieces = moveOrder.filter(m => m.mark === myMark);
 
         // Optimistically remove oldest piece visually
         if (myPieces.length >= 3) {
             const oldest = myPieces[0];
-            // Clear from board state now
             board[oldest.index] = null;
             moveOrder = moveOrder.filter(m => !(m.mark === myMark && m.index === oldest.index));
-            // Animate
             const oldCell = getCell(oldest.index);
             const oldPiece = oldCell.querySelector('.piece');
             if (oldPiece) {
@@ -1242,13 +1243,22 @@
         updateStatus();
     }
 
-    // ── SYNC MOVE — server confirmation handler ───────────────────
+    // ── SYNC MOVE — apply a move to the board ────────────────────
+    // Called for ALL moves: own (to apply animation) and opponent's.
+    // For own moves we skip the state rebuild since handleCellClick already did it,
+    // but we still apply the drop-in animation to the placed piece.
     function syncMove(index, mark) {
         const isOwnMove = (mark === myMark);
 
         if (isOwnMove) {
-            // Our own move: state already updated in handleCellClick.
-            // Just update fading indicators to be safe.
+            // State is already up-to-date from handleCellClick.
+            // Just ensure the placed piece has its drop-in animation class.
+            const cell = getCell(index);
+            const piece = cell.querySelector('.piece');
+            if (piece && !piece.classList.contains('just-placed')) {
+                piece.classList.add('just-placed');
+            }
+            // Re-apply fading indicators
             const current = moveOrder.filter(m => m.mark === mark);
             current.forEach((m, i) => {
                 markFading(m.index, i === 0 && current.length >= 3);
@@ -1256,7 +1266,7 @@
             return;
         }
 
-        // Opponent move: full state update
+        // ── Opponent move: full state update ──
         const pieces = moveOrder.filter(m => m.mark === mark);
 
         if (pieces.length >= 3) {
@@ -1285,13 +1295,19 @@
     socket.on('move_made', data => {
         const { index, mark, game_over, winner, win_line, stats, timeout } = data;
 
+        // FIX: If this round is already resolved on our end, drop the event.
+        // This guards against a racing timeout arriving after a win was processed.
+        if (roundOver) return;
+
         console.log('[move_made]', JSON.stringify(data));
 
+        // Render the move if it's a real placement (not a timeout forfeit)
         if (!timeout && index !== null && index !== undefined) {
             syncMove(index, mark);
         }
 
         if (game_over) {
+            roundOver = true;   // FIX: lock immediately so no second event can re-trigger this
             isMyTurn = false;
             stopTimer();
 
@@ -1304,20 +1320,20 @@
 
             console.log('[GAME OVER] winner:', winner, 'line:', win_line);
 
-            setTimeout(() => { if (win_line) highlightWin(win_line); }, 150);
+            // FIX: Only try to highlight if we actually have a win line
+            if (win_line) {
+                setTimeout(() => highlightWin(win_line), 150);
+            }
+
             setTimeout(() => {
                 const matchOver = matchScore.X >= MATCH_WINS_NEEDED || matchScore.O >= MATCH_WINS_NEEDED;
                 showEndScreen(winner, matchOver);
-            }, 700);
+            }, win_line ? 700 : 300);   // FIX: shorter delay for timeout (no win line to animate)
 
         } else {
-            // After opponent's move it becomes my turn; after my own move it's opponent's turn
-            const nowMyTurn = (mark !== myMark);
-            isMyTurn = nowMyTurn;
+            // Continue game: flip turn and restart timer
+            isMyTurn = (mark !== myMark);
             updateStatus();
-
-            // Only restart timer — the player whose turn it NOW is will start their own countdown
-            // Both clients restart the visual timer so they can both see the countdown
             startTimer();
         }
     });
@@ -1368,9 +1384,10 @@
 
             if (timerLeft <= 0) {
                 stopTimer();
-                // Only emit timeout if it is genuinely our turn
-                if (isMyTurn && gameId) {
+                // FIX: Only emit timeout if: it's our turn, game is active, and round isn't over
+                if (isMyTurn && gameId && !roundOver) {
                     isMyTurn = false;
+                    roundOver = true;   // FIX: lock before emitting to prevent double-emit
                     socket.emit('timeout', { game_id: gameId });
                 }
             }
@@ -1431,6 +1448,7 @@
         }
 
         document.getElementById('rematchBtn').disabled = false;
+        document.getElementById('rematchBtn').style.display = 'block';
         document.getElementById('rematchWaiting').textContent = '';
         rematchRequested = false;
 
@@ -1451,11 +1469,11 @@
     }
 
     socket.on('rematch_start', data => {
-        // Next round or new match starts
         gameId       = data.game_id;
         myMark       = data.mark;
         opponentName = data.opponent_name || opponentName;
         isMyTurn     = data.first_turn === myMark;
+        roundOver    = false;   // FIX: clear round-over guard for new round
 
         if (data.new_match) {
             matchScore = { X: 0, O: 0 };
@@ -1491,6 +1509,7 @@
     // ── FULL RESET ────────────────────────────────────────────────
     function fullReset() {
         stopTimer();
+        roundOver = false;   // FIX: clear on full reset too
         document.getElementById('findGameBtn').style.display = 'block';
         document.getElementById('gameLayout').classList.remove('show');
         document.getElementById('playersBar').classList.remove('show');
