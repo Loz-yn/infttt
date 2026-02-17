@@ -1166,7 +1166,7 @@
     // ═══════════════════════════════════════════════════════
     //  DEBUG CONSOLE
     // ═══════════════════════════════════════════════════════
-    const VERSION = 'v1.7-dev';
+    const VERSION = 'v1.7-debug';
     document.querySelector('.version-tag').textContent = VERSION;
 
     function toggleDebug() {
@@ -1707,7 +1707,10 @@
         setTimeout(fullReset, 2500);
     });
 
-    socket.on('error', data => dbg(`server error: ${data.message}`, 'err'));
+    socket.on('error', data => {
+        dbg(`SERVER ERROR: ${data.message}`, 'err');
+        console.error('Server error:', data.message);
+    });
 
     // ═══════════════════════════════════════════════════════
     //  CHAT

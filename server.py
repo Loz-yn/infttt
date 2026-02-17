@@ -205,28 +205,52 @@ def handle_make_move(data):
     index     = data.get('index')
     player_id = request.sid
 
+    print(f"[make_move] game={game_id} index={index} player={player_id}", flush=True)
+
     if game_id not in games:
+        print(f"[make_move] game not found!", flush=True)
+        emit('error', {'message': 'Game not found'})
         return
 
-    game = games[game_id]
-    mark = game.get_mark(player_id)
+    try:
+        game = games[game_id]
+        mark = game.get_mark(player_id)
 
-    success, removed_index, game_over, winner, win_line = game.make_move(index, mark)
-    if not success:
-        emit('error', {'message': 'Invalid move!'})
-        return
+        print(f"[make_move] mark={mark} turn={game.turn} board={game.board}", flush=True)
 
-    stats_x = stats_o = None
-    if game_over and winner:
-        game.match_score[winner] += 1
-        stats_x = update_user_stats(game.x_username, 'win' if winner == 'X' else 'loss')
-        stats_o = update_user_stats(game.o_username, 'win' if winner == 'O' else 'loss')
+        success, removed_index, game_over, winner, win_line = game.make_move(index, mark)
 
-    payload_base = { 'index': index, 'mark': mark, 'removed_index': removed_index,
-                     'game_over': game_over, 'winner': winner, 'win_line': win_line }
+        print(f"[make_move] success={success} game_over={game_over} winner={winner} win_line={win_line}", flush=True)
 
-    emit('move_made', { **payload_base, 'stats': stats_x }, room=game.x_player)
-    emit('move_made', { **payload_base, 'stats': stats_o }, room=game.o_player)
+        if not success:
+            emit('error', {'message': 'Invalid move!'})
+            return
+
+        stats_x = stats_o = None
+        if game_over and winner:
+            game.match_score[winner] += 1
+            stats_x = update_user_stats(game.x_username, 'win' if winner == 'X' else 'loss')
+            stats_o = update_user_stats(game.o_username, 'win' if winner == 'O' else 'loss')
+            print(f"[make_move] stats updated x={stats_x} o={stats_o}", flush=True)
+
+        payload_base = { 'index': index, 'mark': mark, 'removed_index': removed_index,
+                         'game_over': game_over, 'winner': winner,
+                         'win_line': list(win_line) if win_line else None }
+
+        print(f"[make_move] emitting to x={game.x_player} o={game.o_player}", flush=True)
+        emit('move_made', { **payload_base, 'stats': stats_x }, room=game.x_player)
+        emit('move_made', { **payload_base, 'stats': stats_o }, room=game.o_player)
+        print(f"[make_move] emitted OK", flush=True)
+
+        if game_over:
+            del games[game_id]
+            print(f"[make_move] game deleted", flush=True)
+
+    except Exception as e:
+        import traceback
+        print(f"[make_move] EXCEPTION: {e}", flush=True)
+        traceback.print_exc()
+        emit('error', {'message': f'Server error: {str(e)}'})
 
 
 @socketio.on('timeout')
