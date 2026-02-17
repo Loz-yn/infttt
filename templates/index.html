@@ -1166,7 +1166,7 @@
     // ═══════════════════════════════════════════════════════
     //  DEBUG CONSOLE
     // ═══════════════════════════════════════════════════════
-    const VERSION = 'v1.8-Devmode';
+    const VERSION = 'v1.9';
     document.querySelector('.version-tag').textContent = VERSION;
 
     function toggleDebug() {
@@ -1383,7 +1383,7 @@
     }
 
     // ═══════════════════════════════════════════════════════
-    //  CLICK — send to server, DO NOT update local state here
+    //  CLICK — optimistic render + send to server
     // ═══════════════════════════════════════════════════════
     function handleCellClick(index) {
         if (!gameId)     { dbg('click ignored: no gameId', 'warn'); return; }
@@ -1391,7 +1391,25 @@
         if (board[index]){ dbg(`click ignored: cell ${index} occupied`, 'warn'); return; }
 
         dbg(`clicking cell ${index}`, 'move');
-        // Lock turn immediately to prevent double-send
+
+        // ── OPTIMISTIC RENDER (instant, no server wait) ──
+        // Animate removal of oldest piece if we already have 3
+        const myPieces = moveOrder.filter(m => m.mark === myMark);
+        if (myPieces.length >= 3) {
+            const oldest = myPieces[0];
+            const oldCell = getCell(oldest.index);
+            if (oldCell) {
+                const oldPiece = oldCell.querySelector('.piece');
+                if (oldPiece) {
+                    oldPiece.classList.add('vanishing');
+                    setTimeout(() => { oldCell.innerHTML = ''; oldCell.className = 'cell'; }, 220);
+                }
+            }
+        }
+        // Show piece immediately
+        renderCell(index, myMark);
+
+        // Lock turn to prevent double-click
         isMyTurn = false;
         stopTimer();
         updateStatus();
@@ -1400,13 +1418,14 @@
     }
 
     // ═══════════════════════════════════════════════════════
-    //  SERVER MOVE — single place that updates board state
+    //  SERVER MOVE — updates board[] and moveOrder[] state
     // ═══════════════════════════════════════════════════════
     function applyServerMove(index, mark) {
         dbg(`applyServerMove: mark=${mark} index=${index}`, 'move');
         dbg(`  before: order=[${moveOrder.map(m=>m.mark+'@'+m.index).join(',')}]`, 'info');
 
         const pieces = moveOrder.filter(m => m.mark === mark);
+        const isOwnMove = (mark === myMark);
 
         // Remove oldest piece if player already has 3
         if (pieces.length >= 3) {
@@ -1415,23 +1434,30 @@
             board[oldest.index] = null;
             moveOrder = moveOrder.filter(m => !(m.mark === mark && m.index === oldest.index));
 
-            // Animate removal
-            const oldCell = getCell(oldest.index);
-            if (oldCell) {
-                const oldPiece = oldCell.querySelector('.piece');
-                if (oldPiece) {
-                    oldPiece.classList.add('vanishing');
-                    setTimeout(() => {
-                        if (oldCell) { oldCell.innerHTML = ''; oldCell.className = 'cell'; }
-                    }, 220);
+            if (!isOwnMove) {
+                // Animate opponent removal visually
+                const oldCell = getCell(oldest.index);
+                if (oldCell) {
+                    const oldPiece = oldCell.querySelector('.piece');
+                    if (oldPiece) {
+                        oldPiece.classList.add('vanishing');
+                        setTimeout(() => {
+                            if (oldCell) { oldCell.innerHTML = ''; oldCell.className = 'cell'; }
+                        }, 220);
+                    }
                 }
             }
+            // Own removal already animated optimistically in handleCellClick
         }
 
-        // Place new piece
+        // Update state
         board[index] = { mark };
         moveOrder.push({ mark, index });
-        renderCell(index, mark);
+
+        // Only render cell for opponent — own piece already shown optimistically
+        if (!isOwnMove) {
+            renderCell(index, mark);
+        }
 
         // Refresh fading indicators for this mark
         const current = moveOrder.filter(m => m.mark === mark);
@@ -1451,7 +1477,6 @@
         const { index, mark, game_over, winner, win_line, stats, timeout } = data;
         dbg(`move_made: mark=${mark} idx=${index} game_over=${game_over} winner=${winner} timeout=${timeout}`, 'evt');
 
-        // Apply the move to board state (for both my moves and opponent moves)
         if (!timeout && index !== null && index !== undefined) {
             applyServerMove(index, mark);
         }
@@ -1468,14 +1493,27 @@
                 updateMatchPips();
             }
 
+            const matchOver = matchScore.X >= MATCH_WINS_NEEDED || matchScore.O >= MATCH_WINS_NEEDED;
+            dbg(`matchOver=${matchOver} scores X:${matchScore.X} O:${matchScore.O}`, 'state');
+
             setTimeout(() => { if (win_line) highlightWin(win_line); }, 150);
-            setTimeout(() => {
-                const matchOver = matchScore.X >= MATCH_WINS_NEEDED || matchScore.O >= MATCH_WINS_NEEDED;
-                showEndScreen(winner, matchOver);
-            }, 700);
+
+            if (matchOver) {
+                // Show end screen only when match is fully decided
+                setTimeout(() => showEndScreen(winner, true), 700);
+            } else {
+                // Between rounds: show brief status, then auto-request next round
+                const roundMsg = winner === myMark ? `Round ${roundNumber} — You won! 🎉` : `Round ${roundNumber} — You lost.`;
+                setTimeout(() => {
+                    setStatus(roundMsg, winner === myMark ? 'your-turn' : 'opp-turn');
+                    addSysMsg(roundMsg);
+                    dbg('auto-requesting next round', 'info');
+                    // Auto-send rematch request for both players
+                    socket.emit('rematch_request', { game_id: gameId });
+                }, 700);
+            }
 
         } else {
-            // Turn switches: after mark played, it's my turn only if I'm the other mark
             isMyTurn = (mark !== myMark);
             dbg(`turn switch: mark played=${mark}, myMark=${myMark}, isMyTurn=${isMyTurn}`, 'turn');
             updateStatus();
@@ -1615,7 +1653,7 @@
     }
 
     socket.on('rematch_start', data => {
-        dbg(`rematch_start: mark=${data.mark} first=${data.first_turn}`, 'evt');
+        dbg(`rematch_start: mark=${data.mark} first=${data.first_turn} new_match=${data.new_match}`, 'evt');
         gameId       = data.game_id;
         myMark       = data.mark;
         opponentName = data.opponent_name || opponentName;
@@ -1634,8 +1672,8 @@
         resetBoardDOM();
         updateStatus();
         startTimer();
-        addSysMsg(`Round ${roundNumber} — You are ${myMark}. ${isMyTurn ? 'You go first!' : `${opponentName} goes first.`}`);
-        dbg(`rematch started — I am ${myMark}, my turn: ${isMyTurn}`, 'ok');
+        addSysMsg(`⚡ Round ${roundNumber} — You are ${myMark}. ${isMyTurn ? 'You go first!' : `${opponentName} goes first.`}`);
+        dbg(`round ${roundNumber} started — I am ${myMark}, my turn: ${isMyTurn}`, 'ok');
         dbgUpdateState();
     });
 
