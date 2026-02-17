@@ -882,7 +882,7 @@
 
     <!-- HEADER -->
     <header class="site-header">
-        <div class="logo">∞ TTT<span class="version-tag">v1.4</span></div>
+        <div class="logo">∞ TTT<span class="version-tag">v1.6</span></div>
         <div class="header-btns" id="headerBtns" style="display:none">
             <button class="btn primary" onclick="showLeaderboard()">Leaderboard</button>
             <button class="btn" onclick="logout()">Logout</button>
@@ -1206,10 +1206,17 @@
         if (!gameId || !isMyTurn) return;
         if (board[index]) return;
 
-        // Optimistic visual only — server confirms state
+        // Update state immediately — syncMove will re-confirm from server
+        // but we need board[] set NOW to block double-clicks
         const myPieces = moveOrder.filter(m => m.mark === myMark);
+
+        // Optimistically remove oldest piece visually
         if (myPieces.length >= 3) {
             const oldest = myPieces[0];
+            // Clear from board state now
+            board[oldest.index] = null;
+            moveOrder = moveOrder.filter(m => !(m.mark === myMark && m.index === oldest.index));
+            // Animate
             const oldCell = getCell(oldest.index);
             const oldPiece = oldCell.querySelector('.piece');
             if (oldPiece) {
@@ -1217,7 +1224,17 @@
                 setTimeout(() => { oldCell.innerHTML = ''; oldCell.className = 'cell'; }, 200);
             }
         }
+
+        // Place piece in state and render
+        board[index] = { mark: myMark };
+        moveOrder.push({ mark: myMark, index });
         renderCell(index, myMark, false);
+
+        // Update fading
+        const current = moveOrder.filter(m => m.mark === myMark);
+        current.forEach((m, i) => {
+            markFading(m.index, i === 0 && current.length >= 3);
+        });
 
         isMyTurn = false;
         stopTimer();
@@ -1225,41 +1242,39 @@
         updateStatus();
     }
 
-    // ── SYNC MOVE — updates board[] and moveOrder[] from server ──
+    // ── SYNC MOVE — server confirmation handler ───────────────────
     function syncMove(index, mark) {
+        const isOwnMove = (mark === myMark);
+
+        if (isOwnMove) {
+            // Our own move: state already updated in handleCellClick.
+            // Just update fading indicators to be safe.
+            const current = moveOrder.filter(m => m.mark === mark);
+            current.forEach((m, i) => {
+                markFading(m.index, i === 0 && current.length >= 3);
+            });
+            return;
+        }
+
+        // Opponent move: full state update
         const pieces = moveOrder.filter(m => m.mark === mark);
 
         if (pieces.length >= 3) {
             const oldest = pieces[0];
             board[oldest.index] = null;
             moveOrder = moveOrder.filter(m => !(m.mark === mark && m.index === oldest.index));
-
-            if (mark !== myMark) {
-                // Opponent removal — animate it
-                const oldCell = getCell(oldest.index);
-                const oldPiece = oldCell.querySelector('.piece');
-                if (oldPiece) {
-                    oldPiece.classList.add('vanishing');
-                    setTimeout(() => { oldCell.innerHTML = ''; oldCell.className = 'cell'; }, 200);
-                }
-            } else {
-                // Own removal — visually already handled optimistically, just clean up
-                setTimeout(() => {
-                    const c = getCell(oldest.index);
-                    if (c) { c.innerHTML = ''; c.className = 'cell'; }
-                }, 210);
+            const oldCell = getCell(oldest.index);
+            const oldPiece = oldCell.querySelector('.piece');
+            if (oldPiece) {
+                oldPiece.classList.add('vanishing');
+                setTimeout(() => { oldCell.innerHTML = ''; oldCell.className = 'cell'; }, 200);
             }
         }
 
         board[index] = { mark };
         moveOrder.push({ mark, index });
+        renderCell(index, mark, false);
 
-        // Render opponent piece (ours already rendered optimistically)
-        if (mark !== myMark) {
-            renderCell(index, mark, false);
-        }
-
-        // Update fading indicators
         const current = moveOrder.filter(m => m.mark === mark);
         current.forEach((m, i) => {
             markFading(m.index, i === 0 && current.length >= 3);
@@ -1296,9 +1311,14 @@
             }, 700);
 
         } else {
-            isMyTurn = (mark !== myMark);
-            startTimer();
+            // After opponent's move it becomes my turn; after my own move it's opponent's turn
+            const nowMyTurn = (mark !== myMark);
+            isMyTurn = nowMyTurn;
             updateStatus();
+
+            // Only restart timer — the player whose turn it NOW is will start their own countdown
+            // Both clients restart the visual timer so they can both see the countdown
+            startTimer();
         }
     });
 
@@ -1348,10 +1368,10 @@
 
             if (timerLeft <= 0) {
                 stopTimer();
-                // Time ran out — server will handle timeout
-                if (isMyTurn) {
-                    socket.emit('timeout', { game_id: gameId });
+                // Only emit timeout if it is genuinely our turn
+                if (isMyTurn && gameId) {
                     isMyTurn = false;
+                    socket.emit('timeout', { game_id: gameId });
                 }
             }
         }, 1000);

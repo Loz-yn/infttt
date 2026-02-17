@@ -236,11 +236,19 @@ def handle_timeout(data):
     player_id = request.sid
 
     if game_id not in games:
-        return
+        return  # Already handled (e.g. other player also timed out)
 
     game   = games[game_id]
     mark   = game.get_mark(player_id)
+
+    # Only the player whose turn it is can time out
+    if game.turn != mark:
+        return
+
     winner = 'O' if mark == 'X' else 'X'
+
+    # Delete game immediately to prevent double-timeout
+    del games[game_id]
 
     game.match_score[winner] += 1
     stats_x = update_user_stats(game.x_username, 'win' if winner == 'X' else 'loss')
