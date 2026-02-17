@@ -1,8 +1,6 @@
 from flask import Flask, render_template, request
 from flask_socketio import SocketIO, emit, join_room
-import uuid
-import json
-import os
+import uuid, json, os
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
@@ -10,14 +8,13 @@ app.config['SECRET_KEY'] = 'ttt_secret_key'
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
 DB_FILE = 'ttt_users.json'
-
 games = {}
 waiting_room = []
 player_usernames = {}
 active_sessions = {}
+rematch_requests = {}  # game_id -> set of player sids who requested rematch
 
-
-# ── DATABASE ─────────────────────────────────────────────────────────────────
+# ── DATABASE ──────────────────────────────────────────────────────────────────
 
 def load_users():
     if os.path.exists(DB_FILE):
@@ -63,11 +60,8 @@ def get_leaderboard():
 
 # ── GAME CLASS ────────────────────────────────────────────────────────────────
 
-WIN_LINES = [
-    [0,1,2],[3,4,5],[6,7,8],
-    [0,3,6],[1,4,7],[2,5,8],
-    [0,4,8],[2,4,6]
-]
+WIN_LINES = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]]
+MATCH_WINS_NEEDED = 2
 
 class TTTGame:
     def __init__(self, game_id):
@@ -79,11 +73,11 @@ class TTTGame:
         self.o_player    = None
         self.x_username  = None
         self.o_username  = None
+        self.match_score = {'X': 0, 'O': 0}
+        self.round       = 1
 
     def make_move(self, index, mark):
-        if self.turn != mark:
-            return False, None, False, None, None
-        if self.board[index] is not None:
+        if self.turn != mark or self.board[index] is not None:
             return False, None, False, None, None
 
         removed_index = None
@@ -111,13 +105,24 @@ class TTTGame:
                 return line
         return None
 
+    def reset_round(self):
+        self.board      = [None] * 9
+        self.move_order = []
+        self.turn       = 'X'
+        self.round     += 1
 
-# ── SOCKET HANDLERS ───────────────────────────────────────────────────────────
+    def get_opponent(self, player_id):
+        return self.o_player if player_id == self.x_player else self.x_player
+
+    def get_mark(self, player_id):
+        return 'X' if player_id == self.x_player else 'O'
+
+
+# ── AUTH HANDLERS ─────────────────────────────────────────────────────────────
 
 @app.route('/')
 def index():
     return render_template('index.html')
-
 
 @socketio.on('login')
 def handle_login(data):
@@ -126,14 +131,10 @@ def handle_login(data):
     if not username or not password:
         emit('login_failed', {'message': 'Username and password required!'})
         return
-
     user_data = authenticate_user(username, password)
     if user_data:
         active_sessions[request.sid] = username
-        emit('login_success', {
-            'username': username,
-            'stats': { 'wins': user_data['wins'], 'losses': user_data['losses'], 'draws': user_data['draws'] }
-        })
+        emit('login_success', { 'username': username, 'stats': { 'wins': user_data['wins'], 'losses': user_data['losses'], 'draws': user_data['draws'] } })
     else:
         user = get_user(username)
         if user:
@@ -145,6 +146,8 @@ def handle_login(data):
             else:
                 emit('login_failed', {'message': 'Failed to create account!'})
 
+
+# ── MATCHMAKING ───────────────────────────────────────────────────────────────
 
 @socketio.on('find_game')
 def handle_find_game(data):
@@ -167,21 +170,16 @@ def handle_find_game(data):
         join_room(game_id, sid=opp_id)
         join_room(game_id, sid=player_id)
 
-        emit('game_start', {
-            'game_id': game_id, 'mark': 'X', 'first_turn': 'X',
-            'opponent_name': username,
-            'x_player': opp_username, 'o_player': username,
-        }, room=opp_id)
-
-        emit('game_start', {
-            'game_id': game_id, 'mark': 'O', 'first_turn': 'X',
-            'opponent_name': opp_username,
-            'x_player': opp_username, 'o_player': username,
-        }, room=player_id)
+        emit('game_start', { 'game_id': game_id, 'mark': 'X', 'first_turn': 'X', 'new_match': True,
+            'opponent_name': username, 'x_player': opp_username, 'o_player': username }, room=opp_id)
+        emit('game_start', { 'game_id': game_id, 'mark': 'O', 'first_turn': 'X', 'new_match': True,
+            'opponent_name': opp_username, 'x_player': opp_username, 'o_player': username }, room=player_id)
     else:
         waiting_room.append(player_id)
         emit('waiting', {'message': 'Waiting for opponent...'})
 
+
+# ── MOVES ─────────────────────────────────────────────────────────────────────
 
 @socketio.on('make_move')
 def handle_make_move(data):
@@ -193,36 +191,106 @@ def handle_make_move(data):
         return
 
     game = games[game_id]
-    mark = 'X' if game.x_player == player_id else 'O'
+    mark = game.get_mark(player_id)
 
     success, removed_index, game_over, winner, win_line = game.make_move(index, mark)
-
     if not success:
         emit('error', {'message': 'Invalid move!'})
         return
 
     stats_x = stats_o = None
     if game_over and winner:
+        game.match_score[winner] += 1
         stats_x = update_user_stats(game.x_username, 'win' if winner == 'X' else 'loss')
         stats_o = update_user_stats(game.o_username, 'win' if winner == 'O' else 'loss')
 
-    emit('move_made', {
-        'index': index, 'mark': mark,
-        'removed_index': removed_index,
-        'game_over': game_over, 'winner': winner, 'win_line': win_line,
-        'stats': stats_x
-    }, room=game.x_player)
+    payload_base = { 'index': index, 'mark': mark, 'removed_index': removed_index,
+                     'game_over': game_over, 'winner': winner, 'win_line': win_line }
 
-    emit('move_made', {
-        'index': index, 'mark': mark,
-        'removed_index': removed_index,
-        'game_over': game_over, 'winner': winner, 'win_line': win_line,
-        'stats': stats_o
-    }, room=game.o_player)
+    emit('move_made', { **payload_base, 'stats': stats_x }, room=game.x_player)
+    emit('move_made', { **payload_base, 'stats': stats_o }, room=game.o_player)
 
-    if game_over:
+
+@socketio.on('timeout')
+def handle_timeout(data):
+    """Player ran out of time — forfeit the round."""
+    game_id   = data.get('game_id')
+    player_id = request.sid
+
+    if game_id not in games:
+        return
+
+    game   = games[game_id]
+    mark   = game.get_mark(player_id)
+    winner = 'O' if mark == 'X' else 'X'
+
+    game.match_score[winner] += 1
+    stats_x = update_user_stats(game.x_username, 'win' if winner == 'X' else 'loss')
+    stats_o = update_user_stats(game.o_username, 'win' if winner == 'O' else 'loss')
+
+    payload = { 'index': None, 'mark': mark, 'removed_index': None,
+                'game_over': True, 'winner': winner, 'win_line': None, 'timeout': True }
+
+    emit('move_made', { **payload, 'stats': stats_x }, room=game.x_player)
+    emit('move_made', { **payload, 'stats': stats_o }, room=game.o_player)
+
+
+# ── REMATCH ───────────────────────────────────────────────────────────────────
+
+@socketio.on('rematch_request')
+def handle_rematch(data):
+    game_id   = data.get('game_id')
+    player_id = request.sid
+
+    if game_id not in games:
+        return
+
+    game = games[game_id]
+
+    if game_id not in rematch_requests:
+        rematch_requests[game_id] = set()
+
+    rematch_requests[game_id].add(player_id)
+
+    # Both players agreed — start next round
+    if len(rematch_requests[game_id]) == 2:
+        del rematch_requests[game_id]
+
+        match_over = game.match_score['X'] >= MATCH_WINS_NEEDED or game.match_score['O'] >= MATCH_WINS_NEEDED
+        new_match  = match_over
+
+        if new_match:
+            game.match_score = {'X': 0, 'O': 0}
+            game.round = 0
+
+        game.reset_round()
+
+        # Swap who goes first each round
+        first = 'X' if game.round % 2 == 1 else 'O'
+        new_game_id = str(uuid.uuid4())
+
+        # Create a continuation game with same players
+        new_game            = TTTGame(new_game_id)
+        new_game.x_player   = game.x_player
+        new_game.o_player   = game.o_player
+        new_game.x_username = game.x_username
+        new_game.o_username = game.o_username
+        new_game.match_score = game.match_score
+        new_game.round      = game.round
+        games[new_game_id]  = new_game
+
+        join_room(new_game_id, sid=game.x_player)
+        join_room(new_game_id, sid=game.o_player)
+
+        emit('rematch_start', { 'game_id': new_game_id, 'mark': 'X', 'first_turn': first, 'new_match': new_match,
+            'opponent_name': game.o_username, 'x_player': game.x_username, 'o_player': game.o_username }, room=game.x_player)
+        emit('rematch_start', { 'game_id': new_game_id, 'mark': 'O', 'first_turn': first, 'new_match': new_match,
+            'opponent_name': game.x_username, 'x_player': game.x_username, 'o_player': game.o_username }, room=game.o_player)
+
         del games[game_id]
 
+
+# ── CHAT ──────────────────────────────────────────────────────────────────────
 
 @socketio.on('chat_message')
 def handle_chat(data):
@@ -239,6 +307,8 @@ def handle_leaderboard():
     emit('leaderboard_data', { 'leaderboard': get_leaderboard() })
 
 
+# ── DISCONNECT ────────────────────────────────────────────────────────────────
+
 @socketio.on('disconnect')
 def handle_disconnect():
     player_id = request.sid
@@ -249,7 +319,12 @@ def handle_disconnect():
 
     for game_id, game in list(games.items()):
         if player_id in (game.x_player, game.o_player):
+            opp = game.get_opponent(player_id)
             emit('opponent_disconnected', room=game_id, skip_sid=player_id)
+            # Tell opponent their rematch request is dead
+            if game_id in rematch_requests:
+                emit('rematch_declined', room=opp)
+                del rematch_requests[game_id]
             del games[game_id]
             break
 

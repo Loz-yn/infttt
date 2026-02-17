@@ -438,8 +438,7 @@
             overflow: hidden;
             display: flex;
             flex-direction: column;
-            height: 100%;
-            min-height: 460px;
+            height: 520px;
         }
 
         .chat-head {
@@ -490,10 +489,12 @@
         #chatMessages {
             flex: 1;
             overflow-y: auto;
+            overflow-x: hidden;
             padding: 14px;
             display: flex;
             flex-direction: column;
             gap: 10px;
+            min-height: 0;
             scrollbar-width: thin;
             scrollbar-color: var(--border) transparent;
         }
@@ -681,7 +682,182 @@
         .lb-winrate { color: #4dff91; }
         .lb-me-row td { background: rgba(240,192,96,0.04) !important; }
 
-        /* ── RESPONSIVE ── */
+        /* ── TIMER ── */
+        .timer-bar {
+            display: none;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            margin-bottom: 14px;
+        }
+
+        .timer-bar.show { display: flex; }
+
+        .timer-track {
+            flex: 1;
+            max-width: 320px;
+            height: 6px;
+            background: var(--border);
+            border-radius: 99px;
+            overflow: hidden;
+        }
+
+        .timer-fill {
+            height: 100%;
+            width: 100%;
+            border-radius: 99px;
+            background: var(--accent);
+            transition: width 1s linear, background 0.3s;
+        }
+
+        .timer-fill.urgent { background: var(--x-color); }
+
+        .timer-num {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 22px;
+            min-width: 28px;
+            text-align: center;
+            color: var(--accent);
+            transition: color 0.3s;
+        }
+
+        .timer-num.urgent { color: var(--x-color); }
+
+        /* ── MATCH SCORE ── */
+        .match-bar {
+            display: none;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 10px 20px;
+            margin-bottom: 14px;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+        }
+
+        .match-bar.show { display: flex; }
+
+        .match-label {
+            font-size: 11px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            color: var(--muted);
+        }
+
+        .match-scores {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .match-pip-group { display: flex; gap: 5px; }
+
+        .match-pip {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            border: 1px solid var(--border);
+            background: transparent;
+            transition: background 0.3s, border-color 0.3s;
+        }
+
+        .match-pip.won-x { background: var(--x-color); border-color: var(--x-color); }
+        .match-pip.won-o { background: var(--o-color); border-color: var(--o-color); }
+
+        .match-divider {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 18px;
+            color: var(--muted);
+        }
+
+        /* ── REMATCH / END SCREEN ── */
+        .end-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.8);
+            backdrop-filter: blur(6px);
+            z-index: 200;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .end-overlay.show { display: flex; }
+
+        .end-box {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 40px;
+            text-align: center;
+            min-width: 300px;
+            animation: modalIn 0.3s ease;
+        }
+
+        .end-emoji { font-size: 56px; margin-bottom: 12px; }
+
+        .end-title {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 42px;
+            letter-spacing: 2px;
+            margin-bottom: 6px;
+        }
+
+        .end-sub {
+            font-size: 13px;
+            color: var(--muted);
+            margin-bottom: 28px;
+        }
+
+        .end-match-score {
+            font-size: 13px;
+            color: var(--muted);
+            margin-bottom: 20px;
+        }
+
+        .end-match-score span { color: var(--text); font-weight: bold; }
+
+        .end-btns { display: flex; gap: 12px; justify-content: center; }
+
+        .rematch-btn {
+            padding: 12px 28px;
+            background: rgba(240,192,96,0.1);
+            border: 1px solid var(--accent);
+            border-radius: 8px;
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 20px;
+            letter-spacing: 2px;
+            color: var(--accent);
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .rematch-btn:hover { background: rgba(240,192,96,0.2); }
+        .rematch-btn:disabled { opacity: 0.4; cursor: default; }
+
+        .leave-btn {
+            padding: 12px 28px;
+            background: transparent;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 20px;
+            letter-spacing: 2px;
+            color: var(--muted);
+            cursor: pointer;
+            transition: border-color 0.2s, color 0.2s;
+        }
+
+        .leave-btn:hover { border-color: var(--muted); color: var(--text); }
+
+        .rematch-waiting {
+            font-size: 12px;
+            color: var(--muted);
+            margin-top: 12px;
+            letter-spacing: 1px;
+            min-height: 18px;
+        }
         @media (max-width: 860px) {
             .game-layout.show { flex-direction: column; }
             .chat-section { flex: 1; width: 100%; }
@@ -749,6 +925,30 @@
             </div>
         </div>
 
+        <!-- Match score (Best of 3) -->
+        <div class="match-bar" id="matchBar">
+            <span class="match-label">Best of 3</span>
+            <div class="match-scores">
+                <div class="match-pip-group" id="xPips">
+                    <div class="match-pip" id="xPip0"></div>
+                    <div class="match-pip" id="xPip1"></div>
+                </div>
+                <div class="match-divider">—</div>
+                <div class="match-pip-group" id="oPips">
+                    <div class="match-pip" id="oPip0"></div>
+                    <div class="match-pip" id="oPip1"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Turn timer -->
+        <div class="timer-bar" id="timerBar">
+            <div class="timer-track">
+                <div class="timer-fill" id="timerFill"></div>
+            </div>
+            <div class="timer-num" id="timerNum">15</div>
+        </div>
+
         <!-- Status -->
         <div id="status" class="waiting">Click Find Game to start</div>
 
@@ -787,6 +987,21 @@
         </div>
     </div>
 
+    <!-- END SCREEN / REMATCH -->
+    <div class="end-overlay" id="endOverlay">
+        <div class="end-box">
+            <div class="end-emoji" id="endEmoji">🏆</div>
+            <div class="end-title" id="endTitle">You Won!</div>
+            <div class="end-sub" id="endSub">Great game</div>
+            <div class="end-match-score" id="endMatchScore"></div>
+            <div class="end-btns">
+                <button class="rematch-btn" id="rematchBtn" onclick="requestRematch()">Rematch</button>
+                <button class="leave-btn" onclick="leaveGame()">Leave</button>
+            </div>
+            <div class="rematch-waiting" id="rematchWaiting"></div>
+        </div>
+    </div>
+
     <!-- LEADERBOARD MODAL -->
     <div class="modal-overlay" id="lbModal">
         <div class="modal-box">
@@ -820,7 +1035,7 @@
 
     // State
     let gameId = null;
-    let myMark = null;       // 'X' or 'O'
+    let myMark = null;
     let username = null;
     let opponentName = null;
     let isMyTurn = false;
@@ -828,9 +1043,22 @@
     let isChatMinimized = false;
     let unreadCount = 0;
 
+    // Match state (Best of 3)
+    const MATCH_WINS_NEEDED = 2;
+    let matchScore = { X: 0, O: 0 };
+    let roundNumber = 0;
+
+    // Timer
+    const TURN_TIME = 15;
+    let timerInterval = null;
+    let timerLeft = TURN_TIME;
+
+    // Rematch
+    let rematchRequested = false;
+
     // Game state - managed client side
-    let board = Array(9).fill(null);       // null | { mark, order }
-    let moveOrder = [];                    // list of { index, mark } in placement order
+    let board = Array(9).fill(null);
+    let moveOrder = [];
     let moveCount = 0;
 
     const WIN_LINES = [
@@ -904,10 +1132,17 @@
     socket.on('waiting', data => setStatus(data.message, 'waiting'));
 
     socket.on('game_start', data => {
-        gameId   = data.game_id;
-        myMark   = data.mark;         // 'X' or 'O'
+        gameId       = data.game_id;
+        myMark       = data.mark;
         opponentName = data.opponent_name || 'Opponent';
-        isMyTurn = data.first_turn === myMark;
+        isMyTurn     = data.first_turn === myMark;
+
+        // Reset match score on fresh game
+        if (data.new_match) {
+            matchScore = { X: 0, O: 0 };
+            roundNumber = 0;
+        }
+        roundNumber++;
 
         // Reset local game state
         board     = Array(9).fill(null);
@@ -916,15 +1151,19 @@
 
         document.getElementById('findGameBtn').style.display = 'none';
         document.getElementById('playersBar').classList.add('show');
+        document.getElementById('matchBar').classList.add('show');
+        document.getElementById('timerBar').classList.add('show');
         document.getElementById('gameLayout').classList.add('show');
+        document.getElementById('endOverlay').classList.remove('show');
 
-        // Set player names
         document.getElementById('xPlayer').textContent = data.x_player;
         document.getElementById('oPlayer').textContent = data.o_player;
 
+        updateMatchPips();
         resetBoard();
         updateStatus();
-        addSysMsg(`Game started! You are ${myMark}. ${isMyTurn ? 'You go first!' : `${opponentName} goes first.`}`);
+        startTimer();
+        addSysMsg(`Round ${roundNumber} — You are ${myMark}. ${isMyTurn ? 'You go first!' : `${opponentName} goes first.`}`);
     });
 
     // ── BOARD BUILD ──────────────────────────────────────────────
@@ -953,11 +1192,12 @@
     // ── CLICK HANDLER ────────────────────────────────────────────
     function handleCellClick(index) {
         if (!gameId || !isMyTurn) return;
-        if (board[index]) return;        // cell occupied
+        if (board[index]) return;
 
         applyMove(index, myMark);
         socket.emit('make_move', { game_id: gameId, index });
         isMyTurn = false;
+        stopTimer();
         updateStatus();
     }
 
@@ -1043,27 +1283,35 @@
         const { index, mark, game_over, winner, win_line, stats } = data;
 
         if (mark !== myMark) {
-            // Opponent's move
             applyMove(index, mark);
         }
 
-        isMyTurn = !game_over && mark !== myMark;
+        isMyTurn = !game_over && (mark !== myMark);
 
         if (game_over) {
-            if (win_line) highlightWin(win_line);
+            isMyTurn = false;
+            stopTimer();
 
             if (stats) { userStats = stats; updateStatsDisplay(); }
 
+            // Update match score
+            if (winner && winner !== 'draw') {
+                matchScore[winner]++;
+                updateMatchPips();
+            }
+
             setTimeout(() => {
-                if (winner === myMark)       setStatus('🏆 You won!', 'your-turn');
-                else if (winner === 'draw')  setStatus("It's a draw!", 'playing');
-                else                         setStatus('You lost.', 'opp-turn');
+                if (win_line) highlightWin(win_line);
+            }, 100);
 
-                addSysMsg(winner === myMark ? 'You won! 🎉' : winner === 'draw' ? "Draw!" : 'You lost.');
+            setTimeout(() => {
+                const matchOver = matchScore.X >= MATCH_WINS_NEEDED || matchScore.O >= MATCH_WINS_NEEDED;
+                showEndScreen(winner, matchOver);
+            }, 600);
 
-                setTimeout(endGame, 3000);
-            }, 400);
         } else {
+            isMyTurn = mark !== myMark;
+            startTimer();
             updateStatus();
         }
     });
@@ -1075,14 +1323,156 @@
         });
     }
 
-    function endGame() {
+    // ── TIMER ─────────────────────────────────────────────────────
+    function startTimer() {
+        stopTimer();
+        timerLeft = TURN_TIME;
+        renderTimer();
+
+        timerInterval = setInterval(() => {
+            timerLeft--;
+            renderTimer();
+
+            if (timerLeft <= 0) {
+                stopTimer();
+                // Time ran out — server will handle timeout
+                if (isMyTurn) {
+                    socket.emit('timeout', { game_id: gameId });
+                    isMyTurn = false;
+                }
+            }
+        }, 1000);
+    }
+
+    function stopTimer() {
+        clearInterval(timerInterval);
+        timerInterval = null;
+    }
+
+    function renderTimer() {
+        const fill = document.getElementById('timerFill');
+        const num  = document.getElementById('timerNum');
+        const pct  = (timerLeft / TURN_TIME) * 100;
+        fill.style.width = pct + '%';
+        num.textContent  = timerLeft;
+        const urgent = timerLeft <= 5;
+        fill.classList.toggle('urgent', urgent);
+        num.classList.toggle('urgent', urgent);
+    }
+
+    // ── MATCH PIPS ────────────────────────────────────────────────
+    function updateMatchPips() {
+        ['X', 'O'].forEach(mark => {
+            const wins = matchScore[mark];
+            const prefix = mark.toLowerCase();
+            for (let i = 0; i < 2; i++) {
+                const pip = document.getElementById(`${prefix}Pip${i}`);
+                pip.className = 'match-pip' + (i < wins ? ` won-${prefix}` : '');
+            }
+        });
+    }
+
+    // ── END SCREEN ────────────────────────────────────────────────
+    function showEndScreen(winner, matchOver) {
+        const isWinner = winner === myMark;
+        const isDraw   = winner === 'draw';
+
+        document.getElementById('endEmoji').textContent  = isWinner ? '🏆' : isDraw ? '🤝' : '😞';
+        document.getElementById('endTitle').textContent  = isWinner ? 'You Won!' : isDraw ? 'Draw!' : 'You Lost';
+        document.getElementById('endTitle').style.color  = isWinner ? 'var(--accent)' : isDraw ? 'var(--text)' : 'var(--muted)';
+
+        const myScore   = matchScore[myMark];
+        const oppScore  = matchScore[myMark === 'X' ? 'O' : 'X'];
+        document.getElementById('endMatchScore').innerHTML =
+            `Match score: <span>${myScore}</span> — <span>${oppScore}</span>`;
+
+        if (matchOver) {
+            const matchWinner = matchScore.X >= MATCH_WINS_NEEDED ? 'X' : 'O';
+            document.getElementById('endSub').textContent =
+                matchWinner === myMark ? 'You won the match! 🎉' : `${opponentName} won the match`;
+            document.getElementById('rematchBtn').textContent = 'New Match';
+        } else {
+            document.getElementById('endSub').textContent =
+                `Round ${roundNumber} of 3`;
+            document.getElementById('rematchBtn').textContent = 'Next Round';
+        }
+
+        document.getElementById('rematchBtn').disabled = false;
+        document.getElementById('rematchWaiting').textContent = '';
+        rematchRequested = false;
+
+        addSysMsg(isWinner ? 'You won the round! 🎉' : isDraw ? 'Draw!' : 'You lost the round.');
+        document.getElementById('endOverlay').classList.add('show');
+    }
+
+    function requestRematch() {
+        rematchRequested = true;
+        document.getElementById('rematchBtn').disabled = true;
+        document.getElementById('rematchWaiting').textContent = 'Waiting for opponent...';
+        socket.emit('rematch_request', { game_id: gameId });
+    }
+
+    function leaveGame() {
+        document.getElementById('endOverlay').classList.remove('show');
+        fullReset();
+    }
+
+    socket.on('rematch_start', data => {
+        // Next round or new match starts
+        gameId       = data.game_id;
+        myMark       = data.mark;
+        opponentName = data.opponent_name || opponentName;
+        isMyTurn     = data.first_turn === myMark;
+
+        if (data.new_match) {
+            matchScore = { X: 0, O: 0 };
+            roundNumber = 0;
+        }
+        roundNumber++;
+
+        board     = Array(9).fill(null);
+        moveOrder = [];
+        moveCount = 0;
+
+        document.getElementById('xPlayer').textContent = data.x_player;
+        document.getElementById('oPlayer').textContent = data.o_player;
+        document.getElementById('endOverlay').classList.remove('show');
+
+        updateMatchPips();
+        resetBoard();
+        updateStatus();
+        startTimer();
+        addSysMsg(`Round ${roundNumber} — You are ${myMark}. ${isMyTurn ? 'You go first!' : `${opponentName} goes first.`}`);
+    });
+
+    socket.on('rematch_declined', () => {
+        document.getElementById('rematchWaiting').textContent = 'Opponent left the game.';
+        document.getElementById('rematchBtn').style.display = 'none';
+        setTimeout(() => {
+            document.getElementById('endOverlay').classList.remove('show');
+            document.getElementById('rematchBtn').style.display = 'block';
+            fullReset();
+        }, 2000);
+    });
+
+    // ── FULL RESET ────────────────────────────────────────────────
+    function fullReset() {
+        stopTimer();
         document.getElementById('findGameBtn').style.display = 'block';
         document.getElementById('gameLayout').classList.remove('show');
         document.getElementById('playersBar').classList.remove('show');
+        document.getElementById('matchBar').classList.remove('show');
+        document.getElementById('timerBar').classList.remove('show');
+        document.getElementById('endOverlay').classList.remove('show');
         document.getElementById('chatMessages').innerHTML = '';
         resetBoard();
         setStatus('Click Find Game to start', 'waiting');
-        gameId = null; myMark = null; isMyTurn = false;
+        matchScore = { X: 0, O: 0 };
+        roundNumber = 0;
+        gameId = null;
+        myMark = null;
+        isMyTurn = false;
+        opponentName = null;
     }
 
     // ── STATUS ───────────────────────────────────────────────────
@@ -1109,9 +1499,10 @@
 
     // ── DISCONNECT ───────────────────────────────────────────────
     socket.on('opponent_disconnected', () => {
+        stopTimer();
         addSysMsg('Opponent disconnected.');
         setStatus('Opponent disconnected', 'waiting');
-        setTimeout(endGame, 2500);
+        setTimeout(fullReset, 2500);
     });
 
     socket.on('error', data => console.warn(data.message));
