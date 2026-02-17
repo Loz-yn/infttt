@@ -1203,6 +1203,7 @@
 
     // ── APPLY MOVE (local + from server) ─────────────────────────
     function applyMove(index, mark) {
+        if (index === null || index === undefined) return;
         moveCount++;
 
         const myPieces = moveOrder.filter(m => m.mark === mark);
@@ -1269,13 +1270,12 @@
 
     // ── INCOMING MOVE ─────────────────────────────────────────────
     socket.on('move_made', data => {
-        const { index, mark, game_over, winner, win_line, stats } = data;
+        const { index, mark, game_over, winner, win_line, stats, timeout } = data;
 
-        if (mark !== myMark) {
+        // Apply opponent's move visually (skip if timeout — no piece placed)
+        if (mark !== myMark && index !== null && index !== undefined && !timeout) {
             applyMove(index, mark);
         }
-
-        isMyTurn = !game_over && (mark !== myMark);
 
         if (game_over) {
             isMyTurn = false;
@@ -1283,7 +1283,6 @@
 
             if (stats) { userStats = stats; updateStatsDisplay(); }
 
-            // Update match score
             if (winner && winner !== 'draw') {
                 matchScore[winner]++;
                 updateMatchPips();
@@ -1299,7 +1298,8 @@
             }, 600);
 
         } else {
-            isMyTurn = mark !== myMark;
+            // It's my turn if the opponent just moved
+            isMyTurn = (mark !== myMark);
             startTimer();
             updateStatus();
         }
