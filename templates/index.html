@@ -875,6 +875,108 @@
             .chat-section { flex: 1; width: 100%; }
             .chat-box { min-height: 320px; }
         }
+
+        /* ── DEBUG CONSOLE ── */
+        #debugConsole {
+            position: fixed;
+            top: 0; left: 0;
+            width: 300px;
+            height: 100vh;
+            background: #050508;
+            border-right: 1px solid #1a1a2e;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            font-family: 'DM Mono', monospace;
+            font-size: 11px;
+            transform: translateX(-100%);
+            transition: transform 0.25s ease;
+        }
+        #debugConsole.open { transform: translateX(0); }
+        .dbg-header {
+            padding: 10px 14px;
+            background: #0a0a14;
+            border-bottom: 1px solid #1a1a2e;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-shrink: 0;
+        }
+        .dbg-title { color: #4dff91; letter-spacing: 2px; font-size: 10px; text-transform: uppercase; }
+        .dbg-close { background: none; border: none; color: #5a5a7a; cursor: pointer; font-size: 16px; line-height: 1; }
+        .dbg-close:hover { color: #e8e8f0; }
+        .dbg-state {
+            padding: 10px 14px;
+            border-bottom: 1px solid #1a1a2e;
+            flex-shrink: 0;
+            color: #5a5a7a;
+            line-height: 1.9;
+            font-size: 10px;
+        }
+        .dbg-state .v { color: #e8e8f0; }
+        .dbg-state .vx { color: #ff4d6d; }
+        .dbg-state .vo { color: #4dc9ff; }
+        .dbg-state .vg { color: #4dff91; }
+        #dbgLog {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            min-height: 0;
+            scrollbar-width: thin;
+            scrollbar-color: #1a1a2e transparent;
+        }
+        .dl { padding: 2px 5px; border-radius: 3px; line-height: 1.5; word-break: break-all; font-size: 10px; }
+        .dl.info  { color: #6a6a8a; }
+        .dl.ok    { color: #4dff91; background: rgba(77,255,145,0.05); }
+        .dl.warn  { color: #f0c060; background: rgba(240,192,96,0.06); }
+        .dl.err   { color: #ff4d6d; background: rgba(255,77,109,0.08); }
+        .dl.evt   { color: #4dc9ff; }
+        .dl.move  { color: #c084fc; }
+        .dl.turn  { color: #f0c060; }
+        .dl.state { color: #4dff91; }
+        .dl-t { color: #2a2a4a; margin-right: 5px; }
+        .dbg-footer {
+            padding: 8px;
+            border-top: 1px solid #1a1a2e;
+            display: flex;
+            gap: 6px;
+            flex-shrink: 0;
+        }
+        .dbg-btn {
+            flex: 1; padding: 5px;
+            background: #0f0f1a;
+            border: 1px solid #1a1a2e;
+            border-radius: 4px;
+            color: #5a5a7a;
+            font-family: 'DM Mono', monospace;
+            font-size: 10px;
+            cursor: pointer;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+        .dbg-btn:hover { color: #e8e8f0; border-color: #5a5a7a; }
+        #debugToggle {
+            position: fixed;
+            top: 50%; left: 0;
+            transform: translateY(-50%);
+            background: #0a0a14;
+            border: 1px solid #1a1a2e;
+            border-left: none;
+            border-radius: 0 6px 6px 0;
+            padding: 12px 5px;
+            cursor: pointer;
+            z-index: 10000;
+            writing-mode: vertical-lr;
+            font-family: 'DM Mono', monospace;
+            font-size: 10px;
+            letter-spacing: 2px;
+            color: #4dff91;
+            text-transform: uppercase;
+        }
+        #debugToggle:hover { background: #0f0f20; }
     </style>
 </head>
 <body>
@@ -882,7 +984,7 @@
 
     <!-- HEADER -->
     <header class="site-header">
-        <div class="logo">∞ TTT<span class="version-tag">v1.7</span></div>
+        <div class="logo">∞ TTT<span class="version-tag">v1.6</span></div>
         <div class="header-btns" id="headerBtns" style="display:none">
             <button class="btn primary" onclick="showLeaderboard()">Leaderboard</button>
             <button class="btn" onclick="logout()">Logout</button>
@@ -1038,44 +1140,103 @@
             </table>
         </div>
     </div>
+    <!-- DEBUG TOGGLE -->
+    <button id="debugToggle" onclick="toggleDebug()">Debug</button>
+
+    <!-- DEBUG CONSOLE -->
+    <div id="debugConsole">
+        <div class="dbg-header">
+            <span class="dbg-title">⬡ Debug Console</span>
+            <button class="dbg-close" onclick="toggleDebug()">✕</button>
+        </div>
+        <div class="dbg-state" id="dbgState">
+            loading...
+        </div>
+        <div id="dbgLog"></div>
+        <div class="dbg-footer">
+            <button class="dbg-btn" onclick="dbgClear()">Clear</button>
+            <button class="dbg-btn" onclick="dbgDumpState()">Dump State</button>
+        </div>
+    </div>
 
 </div>
 
 <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
 <script>
+    // ═══════════════════════════════════════════════════════
+    //  DEBUG CONSOLE
+    // ═══════════════════════════════════════════════════════
+    const VERSION = 'v1.7-dev';
+    document.querySelector('.version-tag').textContent = VERSION;
+
+    function toggleDebug() {
+        document.getElementById('debugConsole').classList.toggle('open');
+    }
+
+    function dbg(msg, type = 'info') {
+        const log = document.getElementById('dbgLog');
+        const el  = document.createElement('div');
+        el.className = `dl ${type}`;
+        const t = new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+        el.innerHTML = `<span class="dl-t">${t}</span>${escHtml(String(msg))}`;
+        log.appendChild(el);
+        log.scrollTop = log.scrollHeight;
+        // Keep max 200 lines
+        while (log.children.length > 200) log.removeChild(log.firstChild);
+    }
+
+    function dbgUpdateState() {
+        const s = document.getElementById('dbgState');
+        const boardStr = board.map((v,i) => v ? `<span class="v${v.mark.toLowerCase()}">${v.mark}</span>` : '·').join(' ');
+        const orderStr = moveOrder.map(m => `<span class="v${m.mark.toLowerCase()}">${m.mark}@${m.index}</span>`).join(' ');
+        s.innerHTML = `
+            <div>ver: <span class="v">${VERSION}</span></div>
+            <div>myMark: <span class="v${myMark ? myMark.toLowerCase() : ''}">${myMark || '—'}</span></div>
+            <div>isMyTurn: <span class="${isMyTurn ? 'vg' : 'v'}">${isMyTurn}</span></div>
+            <div>gameId: <span class="v">${gameId ? gameId.slice(0,8)+'…' : '—'}</span></div>
+            <div>board: <span class="v">${boardStr}</span></div>
+            <div>order: <span class="v">${orderStr || '—'}</span></div>
+            <div>match: <span class="vx">X:${matchScore.X}</span> <span class="vo">O:${matchScore.O}</span></div>
+            <div>timer: <span class="v">${timerLeft}s</span> running:<span class="v">${timerInterval !== null}</span></div>
+        `;
+    }
+
+    function dbgClear() { document.getElementById('dbgLog').innerHTML = ''; }
+
+    function dbgDumpState() {
+        dbg('=== STATE DUMP ===', 'warn');
+        dbg(`myMark=${myMark} isMyTurn=${isMyTurn} gameId=${gameId}`, 'warn');
+        dbg(`board=[${board.map((v,i)=>v?v.mark:'_').join(',')}]`, 'warn');
+        dbg(`moveOrder=[${moveOrder.map(m=>m.mark+'@'+m.index).join(',')}]`, 'warn');
+        dbg(`match X:${matchScore.X} O:${matchScore.O} round:${roundNumber}`, 'warn');
+        dbg(`timer: left=${timerLeft} running=${timerInterval!==null}`, 'warn');
+    }
+
+    // ═══════════════════════════════════════════════════════
+    //  STATE
+    // ═══════════════════════════════════════════════════════
     const socket = io();
 
-    // State
-    let gameId = null;
-    let myMark = null;
-    let username = null;
+    let gameId       = null;
+    let myMark       = null;
+    let username     = null;
     let opponentName = null;
-    let isMyTurn = false;
-    let userStats = { wins: 0, losses: 0, draws: 0 };
+    let isMyTurn     = false;
+    let userStats    = { wins: 0, losses: 0, draws: 0 };
     let isChatMinimized = false;
-    let unreadCount = 0;
+    let unreadCount  = 0;
 
-    // FIX: Guard flag — once a round ends, ignore any further move_made events for that round.
-    // This prevents duplicate game_over handling from racing timeout vs. win events.
-    let roundOver = false;
-
-    // Match state (Best of 3)
     const MATCH_WINS_NEEDED = 2;
-    let matchScore = { X: 0, O: 0 };
+    let matchScore  = { X: 0, O: 0 };
     let roundNumber = 0;
 
-    // Timer
-    const TURN_TIME = 15;
+    const TURN_TIME   = 15;
     let timerInterval = null;
-    let timerLeft = TURN_TIME;
+    let timerLeft     = TURN_TIME;
 
-    // Rematch
-    let rematchRequested = false;
-
-    // Game state - managed client side
-    let board = Array(9).fill(null);
-    let moveOrder = [];
-    let moveCount = 0;
+    // Board state — ONLY updated by applyServerMove(), never optimistically
+    let board     = Array(9).fill(null);  // null | { mark }
+    let moveOrder = [];                   // [{ mark, index }, ...] oldest first
 
     const WIN_LINES = [
         [0,1,2],[3,4,5],[6,7,8],
@@ -1083,8 +1244,11 @@
         [0,4,8],[2,4,6]
     ];
 
-    // ── AUTO LOGIN ──────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════
+    //  INIT
+    // ═══════════════════════════════════════════════════════
     window.onload = () => {
+        dbg(`${VERSION} loaded`, 'ok');
         const u = localStorage.getItem('tttUser');
         const p = localStorage.getItem('tttPass');
         if (u && p) {
@@ -1096,26 +1260,33 @@
         document.getElementById('password').addEventListener('keypress', e => { if (e.key === 'Enter') login(); });
         document.getElementById('chatInput').addEventListener('keypress', e => { if (e.key === 'Enter') sendMessage(); });
         buildBoard();
+        dbgUpdateState();
     };
 
-    // ── LOGIN ────────────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════
+    //  AUTH
+    // ═══════════════════════════════════════════════════════
     function login() {
         const u = document.getElementById('username').value.trim();
         const p = document.getElementById('password').value.trim();
-        if (!u) { alert('Enter a username'); return; }
-        if (!p) { alert('Enter a password'); return; }
+        if (!u || !p) { alert('Enter username and password'); return; }
+        dbg(`login attempt: ${u}`, 'info');
         socket.emit('login', { username: u, password: p });
     }
 
     socket.on('login_success', data => {
-        username = data.username;
+        username  = data.username;
         userStats = data.stats;
         localStorage.setItem('tttUser', username);
         localStorage.setItem('tttPass', document.getElementById('password').value);
+        dbg(`logged in as ${username}`, 'ok');
         showGameScreen();
     });
 
-    socket.on('login_failed', data => { alert(data.message); });
+    socket.on('login_failed', data => {
+        dbg(`login failed: ${data.message}`, 'err');
+        alert(data.message);
+    });
 
     function logout() {
         if (!confirm('Logout?')) return;
@@ -1139,32 +1310,37 @@
         document.getElementById('userDraws').textContent  = userStats.draws;
     }
 
-    // ── FIND GAME ────────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════
+    //  MATCHMAKING
+    // ═══════════════════════════════════════════════════════
     document.getElementById('findGameBtn').addEventListener('click', () => {
+        dbg('finding game...', 'info');
         setStatus('Searching for opponent...', 'waiting');
         socket.emit('find_game', { username });
     });
 
-    socket.on('waiting', data => setStatus(data.message, 'waiting'));
+    socket.on('waiting', data => {
+        dbg('in waiting room', 'info');
+        setStatus(data.message, 'waiting');
+    });
 
     socket.on('game_start', data => {
+        dbg(`game_start: mark=${data.mark} first=${data.first_turn} new_match=${data.new_match}`, 'evt');
+
         gameId       = data.game_id;
         myMark       = data.mark;
         opponentName = data.opponent_name || 'Opponent';
-        isMyTurn     = data.first_turn === myMark;
-        roundOver    = false;   // FIX: clear round-over guard for new round
+        isMyTurn     = (data.first_turn === myMark);
 
-        // Reset match score on fresh game
         if (data.new_match) {
-            matchScore = { X: 0, O: 0 };
+            matchScore  = { X: 0, O: 0 };
             roundNumber = 0;
         }
         roundNumber++;
 
-        // Reset local game state
+        // Reset board state completely
         board     = Array(9).fill(null);
         moveOrder = [];
-        moveCount = 0;
 
         document.getElementById('findGameBtn').style.display = 'none';
         document.getElementById('playersBar').classList.add('show');
@@ -1172,142 +1348,116 @@
         document.getElementById('timerBar').classList.add('show');
         document.getElementById('gameLayout').classList.add('show');
         document.getElementById('endOverlay').classList.remove('show');
-
         document.getElementById('xPlayer').textContent = data.x_player;
         document.getElementById('oPlayer').textContent = data.o_player;
 
         updateMatchPips();
-        resetBoard();
+        resetBoardDOM();
         updateStatus();
         startTimer();
         addSysMsg(`Round ${roundNumber} — You are ${myMark}. ${isMyTurn ? 'You go first!' : `${opponentName} goes first.`}`);
+        dbg(`game started — I am ${myMark}, my turn: ${isMyTurn}`, 'ok');
+        dbgUpdateState();
     });
 
-    // ── BOARD BUILD ──────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════
+    //  BOARD
+    // ═══════════════════════════════════════════════════════
     function buildBoard() {
-        const boardEl = document.getElementById('board');
-        boardEl.innerHTML = '';
+        const el = document.getElementById('board');
+        el.innerHTML = '';
         for (let i = 0; i < 9; i++) {
             const cell = document.createElement('div');
             cell.className = 'cell';
             cell.dataset.index = i;
             cell.addEventListener('click', () => handleCellClick(i));
-            boardEl.appendChild(cell);
+            el.appendChild(cell);
         }
     }
 
-    function resetBoard() {
-        board     = Array(9).fill(null);
-        moveOrder = [];
-        moveCount = 0;
+    function resetBoardDOM() {
         document.querySelectorAll('.cell').forEach(c => {
             c.innerHTML = '';
             c.className = 'cell';
         });
     }
 
-    // ── CLICK HANDLER ────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════
+    //  CLICK — send to server, DO NOT update local state here
+    // ═══════════════════════════════════════════════════════
     function handleCellClick(index) {
-        if (!gameId || !isMyTurn || roundOver) return;   // FIX: guard roundOver
-        if (board[index]) return;
+        if (!gameId)     { dbg('click ignored: no gameId', 'warn'); return; }
+        if (!isMyTurn)   { dbg(`click ignored: not my turn (cell ${index})`, 'warn'); return; }
+        if (board[index]){ dbg(`click ignored: cell ${index} occupied`, 'warn'); return; }
 
-        const myPieces = moveOrder.filter(m => m.mark === myMark);
-
-        // Optimistically remove oldest piece visually
-        if (myPieces.length >= 3) {
-            const oldest = myPieces[0];
-            board[oldest.index] = null;
-            moveOrder = moveOrder.filter(m => !(m.mark === myMark && m.index === oldest.index));
-            const oldCell = getCell(oldest.index);
-            const oldPiece = oldCell.querySelector('.piece');
-            if (oldPiece) {
-                oldPiece.classList.add('vanishing');
-                setTimeout(() => { oldCell.innerHTML = ''; oldCell.className = 'cell'; }, 200);
-            }
-        }
-
-        // Place piece in state and render
-        board[index] = { mark: myMark };
-        moveOrder.push({ mark: myMark, index });
-        renderCell(index, myMark, false);
-
-        // Update fading
-        const current = moveOrder.filter(m => m.mark === myMark);
-        current.forEach((m, i) => {
-            markFading(m.index, i === 0 && current.length >= 3);
-        });
-
+        dbg(`clicking cell ${index}`, 'move');
+        // Lock turn immediately to prevent double-send
         isMyTurn = false;
         stopTimer();
-        socket.emit('make_move', { game_id: gameId, index });
         updateStatus();
+        socket.emit('make_move', { game_id: gameId, index });
+        dbgUpdateState();
     }
 
-    // ── SYNC MOVE — apply a move to the board ────────────────────
-    // Called for ALL moves: own (to apply animation) and opponent's.
-    // For own moves we skip the state rebuild since handleCellClick already did it,
-    // but we still apply the drop-in animation to the placed piece.
-    function syncMove(index, mark) {
-        const isOwnMove = (mark === myMark);
+    // ═══════════════════════════════════════════════════════
+    //  SERVER MOVE — single place that updates board state
+    // ═══════════════════════════════════════════════════════
+    function applyServerMove(index, mark) {
+        dbg(`applyServerMove: mark=${mark} index=${index}`, 'move');
+        dbg(`  before: order=[${moveOrder.map(m=>m.mark+'@'+m.index).join(',')}]`, 'info');
 
-        if (isOwnMove) {
-            // State is already up-to-date from handleCellClick.
-            // Just ensure the placed piece has its drop-in animation class.
-            const cell = getCell(index);
-            const piece = cell.querySelector('.piece');
-            if (piece && !piece.classList.contains('just-placed')) {
-                piece.classList.add('just-placed');
-            }
-            // Re-apply fading indicators
-            const current = moveOrder.filter(m => m.mark === mark);
-            current.forEach((m, i) => {
-                markFading(m.index, i === 0 && current.length >= 3);
-            });
-            return;
-        }
-
-        // ── Opponent move: full state update ──
         const pieces = moveOrder.filter(m => m.mark === mark);
 
+        // Remove oldest piece if player already has 3
         if (pieces.length >= 3) {
             const oldest = pieces[0];
+            dbg(`  removing oldest ${mark}@${oldest.index}`, 'warn');
             board[oldest.index] = null;
             moveOrder = moveOrder.filter(m => !(m.mark === mark && m.index === oldest.index));
+
+            // Animate removal
             const oldCell = getCell(oldest.index);
-            const oldPiece = oldCell.querySelector('.piece');
-            if (oldPiece) {
-                oldPiece.classList.add('vanishing');
-                setTimeout(() => { oldCell.innerHTML = ''; oldCell.className = 'cell'; }, 200);
+            if (oldCell) {
+                const oldPiece = oldCell.querySelector('.piece');
+                if (oldPiece) {
+                    oldPiece.classList.add('vanishing');
+                    setTimeout(() => {
+                        if (oldCell) { oldCell.innerHTML = ''; oldCell.className = 'cell'; }
+                    }, 220);
+                }
             }
         }
 
+        // Place new piece
         board[index] = { mark };
         moveOrder.push({ mark, index });
-        renderCell(index, mark, false);
+        renderCell(index, mark);
 
+        // Refresh fading indicators for this mark
         const current = moveOrder.filter(m => m.mark === mark);
         current.forEach((m, i) => {
             markFading(m.index, i === 0 && current.length >= 3);
         });
+
+        dbg(`  after: order=[${moveOrder.map(m=>m.mark+'@'+m.index).join(',')}]`, 'info');
+        dbg(`  board=[${board.map((v,i)=>v?v.mark:'_').join(',')}]`, 'info');
+        dbgUpdateState();
     }
 
-    // ── INCOMING MOVE ─────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════
+    //  SOCKET: MOVE MADE
+    // ═══════════════════════════════════════════════════════
     socket.on('move_made', data => {
         const { index, mark, game_over, winner, win_line, stats, timeout } = data;
+        dbg(`move_made: mark=${mark} idx=${index} game_over=${game_over} winner=${winner} timeout=${timeout}`, 'evt');
 
-        // FIX: If this round is already resolved on our end, drop the event.
-        // This guards against a racing timeout arriving after a win was processed.
-        if (roundOver) return;
-
-        console.log('[move_made]', JSON.stringify(data));
-
-        // Render the move if it's a real placement (not a timeout forfeit)
+        // Apply the move to board state (for both my moves and opponent moves)
         if (!timeout && index !== null && index !== undefined) {
-            syncMove(index, mark);
+            applyServerMove(index, mark);
         }
 
         if (game_over) {
-            roundOver = true;   // FIX: lock immediately so no second event can re-trigger this
+            dbg(`GAME OVER — winner=${winner} line=${JSON.stringify(win_line)}`, 'ok');
             isMyTurn = false;
             stopTimer();
 
@@ -1318,38 +1468,35 @@
                 updateMatchPips();
             }
 
-            console.log('[GAME OVER] winner:', winner, 'line:', win_line);
-
-            // FIX: Only try to highlight if we actually have a win line
-            if (win_line) {
-                setTimeout(() => highlightWin(win_line), 150);
-            }
-
+            setTimeout(() => { if (win_line) highlightWin(win_line); }, 150);
             setTimeout(() => {
                 const matchOver = matchScore.X >= MATCH_WINS_NEEDED || matchScore.O >= MATCH_WINS_NEEDED;
                 showEndScreen(winner, matchOver);
-            }, win_line ? 700 : 300);   // FIX: shorter delay for timeout (no win line to animate)
+            }, 700);
 
         } else {
-            // Continue game: flip turn and restart timer
+            // Turn switches: after mark played, it's my turn only if I'm the other mark
             isMyTurn = (mark !== myMark);
+            dbg(`turn switch: mark played=${mark}, myMark=${myMark}, isMyTurn=${isMyTurn}`, 'turn');
             updateStatus();
             startTimer();
+            dbgUpdateState();
         }
     });
 
-    function renderCell(index, mark, fading) {
+    // ═══════════════════════════════════════════════════════
+    //  RENDERING HELPERS
+    // ═══════════════════════════════════════════════════════
+    function renderCell(index, mark) {
         const cell = getCell(index);
+        if (!cell) { dbg(`renderCell: no cell at ${index}!`, 'err'); return; }
         cell.classList.add('taken');
         cell.innerHTML = `<span class="piece ${mark.toLowerCase()} just-placed">${mark}</span>`;
-        if (fading) {
-            cell.classList.add('fading-cell');
-            cell.querySelector('.piece').classList.add('fading');
-        }
     }
 
     function markFading(index, shouldFade) {
-        const cell = getCell(index);
+        const cell  = getCell(index);
+        if (!cell) return;
         const piece = cell.querySelector('.piece');
         if (!piece) return;
         if (shouldFade) {
@@ -1366,37 +1513,42 @@
     }
 
     function highlightWin(line) {
+        dbg(`highlighting win line: ${JSON.stringify(line)}`, 'ok');
         line.forEach(i => {
             const cell = getCell(i);
             if (cell) cell.classList.add('win-cell');
         });
     }
 
-    // ── TIMER ─────────────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════
+    //  TIMER
+    // ═══════════════════════════════════════════════════════
     function startTimer() {
         stopTimer();
         timerLeft = TURN_TIME;
         renderTimer();
-
         timerInterval = setInterval(() => {
             timerLeft--;
             renderTimer();
-
+            dbgUpdateState();
             if (timerLeft <= 0) {
                 stopTimer();
-                // FIX: Only emit timeout if: it's our turn, game is active, and round isn't over
-                if (isMyTurn && gameId && !roundOver) {
+                dbg(`timer expired — isMyTurn=${isMyTurn}`, 'warn');
+                if (isMyTurn && gameId) {
+                    dbg('emitting timeout', 'warn');
                     isMyTurn = false;
-                    roundOver = true;   // FIX: lock before emitting to prevent double-emit
                     socket.emit('timeout', { game_id: gameId });
+                    dbgUpdateState();
                 }
             }
         }, 1000);
     }
 
     function stopTimer() {
-        clearInterval(timerInterval);
-        timerInterval = null;
+        if (timerInterval) {
+            clearInterval(timerInterval);
+            timerInterval = null;
+        }
     }
 
     function renderTimer() {
@@ -1410,54 +1562,48 @@
         num.classList.toggle('urgent', urgent);
     }
 
-    // ── MATCH PIPS ────────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════
+    //  MATCH PIPS
+    // ═══════════════════════════════════════════════════════
     function updateMatchPips() {
         ['X', 'O'].forEach(mark => {
             const wins = matchScore[mark];
-            const prefix = mark.toLowerCase();
+            const p    = mark.toLowerCase();
             for (let i = 0; i < 2; i++) {
-                const pip = document.getElementById(`${prefix}Pip${i}`);
-                pip.className = 'match-pip' + (i < wins ? ` won-${prefix}` : '');
+                const pip = document.getElementById(`${p}Pip${i}`);
+                if (pip) pip.className = 'match-pip' + (i < wins ? ` won-${p}` : '');
             }
         });
     }
 
-    // ── END SCREEN ────────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════
+    //  END SCREEN / REMATCH
+    // ═══════════════════════════════════════════════════════
     function showEndScreen(winner, matchOver) {
         const isWinner = winner === myMark;
         const isDraw   = winner === 'draw';
+        dbg(`showEndScreen: winner=${winner} myMark=${myMark} matchOver=${matchOver}`, 'state');
 
         document.getElementById('endEmoji').textContent  = isWinner ? '🏆' : isDraw ? '🤝' : '😞';
         document.getElementById('endTitle').textContent  = isWinner ? 'You Won!' : isDraw ? 'Draw!' : 'You Lost';
         document.getElementById('endTitle').style.color  = isWinner ? 'var(--accent)' : isDraw ? 'var(--text)' : 'var(--muted)';
 
-        const myScore   = matchScore[myMark];
-        const oppScore  = matchScore[myMark === 'X' ? 'O' : 'X'];
-        document.getElementById('endMatchScore').innerHTML =
-            `Match score: <span>${myScore}</span> — <span>${oppScore}</span>`;
-
-        if (matchOver) {
-            const matchWinner = matchScore.X >= MATCH_WINS_NEEDED ? 'X' : 'O';
-            document.getElementById('endSub').textContent =
-                matchWinner === myMark ? 'You won the match! 🎉' : `${opponentName} won the match`;
-            document.getElementById('rematchBtn').textContent = 'New Match';
-        } else {
-            document.getElementById('endSub').textContent =
-                `Round ${roundNumber} of 3`;
-            document.getElementById('rematchBtn').textContent = 'Next Round';
-        }
-
-        document.getElementById('rematchBtn').disabled = false;
-        document.getElementById('rematchBtn').style.display = 'block';
+        const myScore  = matchScore[myMark];
+        const oppScore = matchScore[myMark === 'X' ? 'O' : 'X'];
+        document.getElementById('endMatchScore').innerHTML = `Match: <span>${myScore}</span> — <span>${oppScore}</span>`;
+        document.getElementById('endSub').textContent = matchOver
+            ? (isWinner ? 'You won the match! 🎉' : `${opponentName} won the match`)
+            : `Round ${roundNumber} of 3`;
+        document.getElementById('rematchBtn').textContent = matchOver ? 'New Match' : 'Next Round';
+        document.getElementById('rematchBtn').disabled    = false;
         document.getElementById('rematchWaiting').textContent = '';
-        rematchRequested = false;
 
-        addSysMsg(isWinner ? 'You won the round! 🎉' : isDraw ? 'Draw!' : 'You lost the round.');
+        addSysMsg(isWinner ? 'You won! 🎉' : isDraw ? 'Draw!' : 'You lost.');
         document.getElementById('endOverlay').classList.add('show');
     }
 
     function requestRematch() {
-        rematchRequested = true;
+        dbg('requesting rematch', 'info');
         document.getElementById('rematchBtn').disabled = true;
         document.getElementById('rematchWaiting').textContent = 'Waiting for opponent...';
         socket.emit('rematch_request', { game_id: gameId });
@@ -1469,47 +1615,42 @@
     }
 
     socket.on('rematch_start', data => {
+        dbg(`rematch_start: mark=${data.mark} first=${data.first_turn}`, 'evt');
         gameId       = data.game_id;
         myMark       = data.mark;
         opponentName = data.opponent_name || opponentName;
-        isMyTurn     = data.first_turn === myMark;
-        roundOver    = false;   // FIX: clear round-over guard for new round
+        isMyTurn     = (data.first_turn === myMark);
 
-        if (data.new_match) {
-            matchScore = { X: 0, O: 0 };
-            roundNumber = 0;
-        }
+        if (data.new_match) { matchScore = { X: 0, O: 0 }; roundNumber = 0; }
         roundNumber++;
-
         board     = Array(9).fill(null);
         moveOrder = [];
-        moveCount = 0;
 
         document.getElementById('xPlayer').textContent = data.x_player;
         document.getElementById('oPlayer').textContent = data.o_player;
         document.getElementById('endOverlay').classList.remove('show');
 
         updateMatchPips();
-        resetBoard();
+        resetBoardDOM();
         updateStatus();
         startTimer();
         addSysMsg(`Round ${roundNumber} — You are ${myMark}. ${isMyTurn ? 'You go first!' : `${opponentName} goes first.`}`);
+        dbg(`rematch started — I am ${myMark}, my turn: ${isMyTurn}`, 'ok');
+        dbgUpdateState();
     });
 
     socket.on('rematch_declined', () => {
-        document.getElementById('rematchWaiting').textContent = 'Opponent left the game.';
-        document.getElementById('rematchBtn').style.display = 'none';
-        setTimeout(() => {
-            document.getElementById('endOverlay').classList.remove('show');
-            document.getElementById('rematchBtn').style.display = 'block';
-            fullReset();
-        }, 2000);
+        dbg('rematch declined — opponent left', 'warn');
+        document.getElementById('rematchWaiting').textContent = 'Opponent left.';
+        setTimeout(() => { document.getElementById('endOverlay').classList.remove('show'); fullReset(); }, 2000);
     });
 
-    // ── FULL RESET ────────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════
+    //  FULL RESET
+    // ═══════════════════════════════════════════════════════
     function fullReset() {
+        dbg('fullReset()', 'warn');
         stopTimer();
-        roundOver = false;   // FIX: clear on full reset too
         document.getElementById('findGameBtn').style.display = 'block';
         document.getElementById('gameLayout').classList.remove('show');
         document.getElementById('playersBar').classList.remove('show');
@@ -1517,17 +1658,22 @@
         document.getElementById('timerBar').classList.remove('show');
         document.getElementById('endOverlay').classList.remove('show');
         document.getElementById('chatMessages').innerHTML = '';
-        resetBoard();
-        setStatus('Click Find Game to start', 'waiting');
-        matchScore = { X: 0, O: 0 };
+        resetBoardDOM();
+        board     = Array(9).fill(null);
+        moveOrder = [];
+        matchScore  = { X: 0, O: 0 };
         roundNumber = 0;
-        gameId = null;
-        myMark = null;
-        isMyTurn = false;
+        gameId      = null;
+        myMark      = null;
+        isMyTurn    = false;
         opponentName = null;
+        setStatus('Click Find Game to start', 'waiting');
+        dbgUpdateState();
     }
 
-    // ── STATUS ───────────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════
+    //  STATUS
+    // ═══════════════════════════════════════════════════════
     function setStatus(msg, cls) {
         const el = document.getElementById('status');
         el.textContent = msg;
@@ -1537,29 +1683,35 @@
     function updateStatus() {
         const xEl = document.getElementById('xPlayer');
         const oEl = document.getElementById('oPlayer');
-        if (myMark === 'X') {
-            xEl.classList.toggle('active', isMyTurn);
-            oEl.classList.toggle('active', !isMyTurn);
-        } else {
-            oEl.classList.toggle('active', isMyTurn);
-            xEl.classList.toggle('active', !isMyTurn);
+        if (xEl && oEl) {
+            if (myMark === 'X') {
+                xEl.classList.toggle('active', isMyTurn);
+                oEl.classList.toggle('active', !isMyTurn);
+            } else {
+                oEl.classList.toggle('active', isMyTurn);
+                xEl.classList.toggle('active', !isMyTurn);
+            }
         }
-
         if (isMyTurn) setStatus('Your turn', 'your-turn');
-        else          setStatus(`${opponentName}'s turn...`, 'opp-turn');
+        else if (gameId) setStatus(`${opponentName || 'Opponent'}'s turn...`, 'opp-turn');
     }
 
-    // ── DISCONNECT ───────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════
+    //  DISCONNECT
+    // ═══════════════════════════════════════════════════════
     socket.on('opponent_disconnected', () => {
+        dbg('opponent disconnected', 'warn');
         stopTimer();
         addSysMsg('Opponent disconnected.');
         setStatus('Opponent disconnected', 'waiting');
         setTimeout(fullReset, 2500);
     });
 
-    socket.on('error', data => console.warn(data.message));
+    socket.on('error', data => dbg(`server error: ${data.message}`, 'err'));
 
-    // ── CHAT ─────────────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════
+    //  CHAT
+    // ═══════════════════════════════════════════════════════
     function sendMessage() {
         const input = document.getElementById('chatInput');
         const msg   = input.value.trim();
@@ -1583,10 +1735,7 @@
         const div  = document.createElement('div');
         div.className = `msg ${own ? 'own' : 'opp'}`;
         const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        div.innerHTML = `
-            <div class="msg-sender">${sender}</div>
-            <div class="msg-bubble">${escHtml(text)}</div>
-            <div class="msg-time">${time}</div>`;
+        div.innerHTML = `<div class="msg-sender">${sender}</div><div class="msg-bubble">${escHtml(text)}</div><div class="msg-time">${time}</div>`;
         wrap.appendChild(div);
         wrap.scrollTop = wrap.scrollHeight;
     }
@@ -1620,7 +1769,9 @@
         return d.innerHTML;
     }
 
-    // ── LEADERBOARD ──────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════
+    //  LEADERBOARD
+    // ═══════════════════════════════════════════════════════
     function showLeaderboard() {
         document.getElementById('lbModal').classList.add('show');
         socket.emit('get_leaderboard');
@@ -1648,18 +1799,16 @@
             tr.innerHTML = `
                 <td class="rank-num ${rankCls}">${rank}</td>
                 <td class="${isMe ? 'lb-you' : ''}">${p.username}${isMe ? ' ← you' : ''}</td>
-                <td>${p.wins}</td>
-                <td>${p.losses}</td>
-                <td>${p.draws}</td>
+                <td>${p.wins}</td><td>${p.losses}</td><td>${p.draws}</td>
                 <td class="lb-winrate">${winRate}%</td>`;
             tbody.appendChild(tr);
         });
     });
 
-    // Close modal on backdrop click
     document.getElementById('lbModal').addEventListener('click', e => {
         if (e.target === document.getElementById('lbModal')) closeLeaderboard();
     });
 </script>
+
 </body>
 </html>
