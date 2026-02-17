@@ -238,18 +238,63 @@ def handle_make_move(data):
                          'game_over': game_over, 'winner': winner,
                          'win_line': list(win_line) if win_line else None }
 
-        print(f"[make_move] emitting to x={game.x_player} o={game.o_player}", flush=True)
         emit('move_made', { **payload_base, 'stats': stats_x }, room=game.x_player)
         emit('move_made', { **payload_base, 'stats': stats_o }, room=game.o_player)
         print(f"[make_move] emitted OK", flush=True)
 
-        # Do NOT delete game here — rematch handler needs it to start next round
+        # If round ended but match not over, auto-start next round after short delay
+        if game_over:
+            match_over = game.match_score['X'] >= MATCH_WINS_NEEDED or game.match_score['O'] >= MATCH_WINS_NEEDED
+            if not match_over:
+                socketio.sleep(1.5)
+                _start_next_round(game_id)
+            # If match IS over, game stays until players leave/rematch manually
 
     except Exception as e:
         import traceback
         print(f"[make_move] EXCEPTION: {e}", flush=True)
         traceback.print_exc()
         emit('error', {'message': f'Server error: {str(e)}'})
+def _start_next_round(game_id):
+    """Auto-start the next round for an ongoing match."""
+    if game_id not in games:
+        print(f"[next_round] game {game_id} already gone", flush=True)
+        return
+
+    game = games[game_id]
+    game.reset_round()
+
+    first = 'X' if game.round % 2 == 1 else 'O'
+    new_game_id = str(uuid.uuid4())
+
+    new_game             = TTTGame(new_game_id)
+    new_game.x_player    = game.x_player
+    new_game.o_player    = game.o_player
+    new_game.x_username  = game.x_username
+    new_game.o_username  = game.o_username
+    new_game.match_score = dict(game.match_score)
+    new_game.round       = game.round
+    games[new_game_id]   = new_game
+
+    # Join both sockets to the new game room
+    join_room(new_game_id, sid=game.x_player)
+    join_room(new_game_id, sid=game.o_player)
+
+    print(f"[next_round] starting round {new_game.round} game={new_game_id} first={first}", flush=True)
+
+    # Emit to each player individually using their socket ID as room
+    emit('rematch_start', {
+        'game_id': new_game_id, 'mark': 'X', 'first_turn': first, 'new_match': False,
+        'opponent_name': game.o_username, 'x_player': game.x_username, 'o_player': game.o_username
+    }, room=game.x_player)
+    emit('rematch_start', {
+        'game_id': new_game_id, 'mark': 'O', 'first_turn': first, 'new_match': False,
+        'opponent_name': game.x_username, 'x_player': game.x_username, 'o_player': game.o_username
+    }, room=game.o_player)
+
+    del games[game_id]
+    print(f"[next_round] old game {game_id} cleaned up", flush=True)
+
 
 @socketio.on('timeout')
 def handle_timeout(data):

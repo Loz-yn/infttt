@@ -1166,7 +1166,7 @@
     // ═══════════════════════════════════════════════════════
     //  DEBUG CONSOLE
     // ═══════════════════════════════════════════════════════
-    const VERSION = 'v1.10/Alpha';
+    const VERSION = 'v1.11/Alpha';
     document.querySelector('.version-tag').textContent = VERSION;
 
     function toggleDebug() {
@@ -1502,15 +1502,10 @@
                 // Show end screen only when match is fully decided
                 setTimeout(() => showEndScreen(winner, true), 700);
             } else {
-                // Between rounds: show brief status, then auto-request next round
+                // Between rounds: just show a message — server auto-starts next round
                 const roundMsg = winner === myMark ? `Round ${roundNumber} — You won! 🎉` : `Round ${roundNumber} — You lost.`;
-                setTimeout(() => {
-                    setStatus(roundMsg, winner === myMark ? 'your-turn' : 'opp-turn');
-                    addSysMsg(roundMsg);
-                    dbg('auto-requesting next round', 'info');
-                    // Auto-send rematch request for both players
-                    socket.emit('rematch_request', { game_id: gameId });
-                }, 700);
+                addSysMsg(roundMsg);
+                dbg('waiting for server to start next round...', 'info');
             }
 
         } else {
