@@ -243,16 +243,13 @@ def handle_make_move(data):
         emit('move_made', { **payload_base, 'stats': stats_o }, room=game.o_player)
         print(f"[make_move] emitted OK", flush=True)
 
-        if game_over:
-            del games[game_id]
-            print(f"[make_move] game deleted", flush=True)
+        # Do NOT delete game here — rematch handler needs it to start next round
 
     except Exception as e:
         import traceback
         print(f"[make_move] EXCEPTION: {e}", flush=True)
         traceback.print_exc()
         emit('error', {'message': f'Server error: {str(e)}'})
-
 
 @socketio.on('timeout')
 def handle_timeout(data):
