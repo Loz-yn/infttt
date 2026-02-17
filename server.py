@@ -83,16 +83,34 @@ class TTTGame:
         removed_index = None
         my_pieces = [(m, i) for m, i in self.move_order if m == mark]
 
+        # Step 1: Determine which piece would be removed (the oldest)
+        oldest_index = None
         if len(my_pieces) >= 3:
-            _, oldest_index = my_pieces[0]
+            oldest_index = my_pieces[0][1]
+
+        # Step 2: Simulate the final board state —
+        # remove oldest, place new piece, then check win
+        temp_board = self.board[:]
+        if oldest_index is not None:
+            temp_board[oldest_index] = None
+        temp_board[index] = mark
+
+        win_line = None
+        for line in WIN_LINES:
+            if all(temp_board[i] == mark for i in line):
+                win_line = line
+                break
+
+        # Step 3: Apply the changes for real
+        if oldest_index is not None:
             self.board[oldest_index] = None
-            self.move_order = [(m, i) for m, i in self.move_order if not (m == mark and i == oldest_index)]
+            self.move_order = [(m, i) for m, i in self.move_order
+                               if not (m == mark and i == oldest_index)]
             removed_index = oldest_index
 
         self.board[index] = mark
         self.move_order.append((mark, index))
 
-        win_line = self._check_winner(mark)
         if win_line:
             return True, removed_index, True, mark, win_line
 

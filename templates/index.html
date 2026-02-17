@@ -1205,50 +1205,39 @@
     function applyMove(index, mark) {
         moveCount++;
 
-        // Figure out which pieces of `mark` are on board
         const myPieces = moveOrder.filter(m => m.mark === mark);
-
         let removedIndex = null;
 
-        // If this is the 4th+ piece for this player, remove their oldest
+        // Remove oldest piece from board array and start vanish animation
         if (myPieces.length >= 3) {
             const oldest = myPieces[0];
             removedIndex = oldest.index;
-            removeFromBoard(oldest.index);
+            board[removedIndex] = null;
             moveOrder = moveOrder.filter(m => !(m.mark === mark && m.index === oldest.index));
+
+            // Animate vanish
+            const oldCell = getCell(removedIndex);
+            const oldPiece = oldCell.querySelector('.piece');
+            if (oldPiece) {
+                oldPiece.classList.remove('just-placed');
+                oldPiece.classList.add('vanishing');
+                setTimeout(() => {
+                    oldCell.innerHTML = '';
+                    oldCell.className = 'cell';
+                }, 200);
+            }
         }
 
         // Place new piece
         board[index] = { mark, order: moveCount };
         moveOrder.push({ mark, index });
-
         renderCell(index, mark, false);
 
-        // After placing, mark the NEW oldest piece of this player as fading
-        const updatedMyPieces = moveOrder.filter(m => m.mark === mark);
-        if (updatedMyPieces.length >= 3) {
-            const nextToFade = updatedMyPieces[0].index;
-            markFading(nextToFade, true);
-        }
-
-        // Also un-fade any previously faded piece of this player that isn't oldest anymore
-        moveOrder.filter(m => m.mark === mark).forEach((m, i) => {
-            markFading(m.index, i === 0 && moveOrder.filter(x => x.mark === mark).length >= 3);
+        // Re-evaluate fading indicators for this mark
+        const currentPieces = moveOrder.filter(m => m.mark === mark);
+        currentPieces.forEach((m, i) => {
+            markFading(m.index, i === 0 && currentPieces.length >= 3);
         });
-    }
-
-    function removeFromBoard(index) {
-        board[index] = null;
-        const cell = getCell(index);
-        const piece = cell.querySelector('.piece');
-        if (piece) {
-            piece.classList.remove('just-placed');
-            piece.classList.add('vanishing');
-            setTimeout(() => {
-                cell.innerHTML = '';
-                cell.className = 'cell';
-            }, 200);
-        }
     }
 
     function renderCell(index, mark, fading) {
