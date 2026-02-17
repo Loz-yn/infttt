@@ -58,6 +58,18 @@
             -webkit-text-fill-color: transparent;
         }
 
+        .version-tag {
+            font-size: 10px;
+            letter-spacing: 2px;
+            color: var(--muted);
+            text-transform: uppercase;
+            margin-left: 10px;
+            vertical-align: middle;
+            -webkit-text-fill-color: var(--muted);
+            background: none;
+            -webkit-background-clip: unset;
+        }
+
         .header-btns { display: flex; gap: 10px; }
 
         .btn {
@@ -870,7 +882,7 @@
 
     <!-- HEADER -->
     <header class="site-header">
-        <div class="logo">∞ TTT</div>
+        <div class="logo">∞ TTT<span class="version-tag">v1.4</span></div>
         <div class="header-btns" id="headerBtns" style="display:none">
             <button class="btn primary" onclick="showLeaderboard()">Leaderboard</button>
             <button class="btn" onclick="logout()">Logout</button>
@@ -1194,52 +1206,101 @@
         if (!gameId || !isMyTurn) return;
         if (board[index]) return;
 
-        applyMove(index, myMark);
-        socket.emit('make_move', { game_id: gameId, index });
+        // Optimistic visual only — server confirms state
+        const myPieces = moveOrder.filter(m => m.mark === myMark);
+        if (myPieces.length >= 3) {
+            const oldest = myPieces[0];
+            const oldCell = getCell(oldest.index);
+            const oldPiece = oldCell.querySelector('.piece');
+            if (oldPiece) {
+                oldPiece.classList.add('vanishing');
+                setTimeout(() => { oldCell.innerHTML = ''; oldCell.className = 'cell'; }, 200);
+            }
+        }
+        renderCell(index, myMark, false);
+
         isMyTurn = false;
         stopTimer();
+        socket.emit('make_move', { game_id: gameId, index });
         updateStatus();
     }
 
-    // ── APPLY MOVE (local + from server) ─────────────────────────
-    function applyMove(index, mark) {
-        if (index === null || index === undefined) return;
-        moveCount++;
+    // ── SYNC MOVE — updates board[] and moveOrder[] from server ──
+    function syncMove(index, mark) {
+        const pieces = moveOrder.filter(m => m.mark === mark);
 
-        const myPieces = moveOrder.filter(m => m.mark === mark);
-        let removedIndex = null;
-
-        // Remove oldest piece from board array and start vanish animation
-        if (myPieces.length >= 3) {
-            const oldest = myPieces[0];
-            removedIndex = oldest.index;
-            board[removedIndex] = null;
+        if (pieces.length >= 3) {
+            const oldest = pieces[0];
+            board[oldest.index] = null;
             moveOrder = moveOrder.filter(m => !(m.mark === mark && m.index === oldest.index));
 
-            // Animate vanish
-            const oldCell = getCell(removedIndex);
-            const oldPiece = oldCell.querySelector('.piece');
-            if (oldPiece) {
-                oldPiece.classList.remove('just-placed');
-                oldPiece.classList.add('vanishing');
+            if (mark !== myMark) {
+                // Opponent removal — animate it
+                const oldCell = getCell(oldest.index);
+                const oldPiece = oldCell.querySelector('.piece');
+                if (oldPiece) {
+                    oldPiece.classList.add('vanishing');
+                    setTimeout(() => { oldCell.innerHTML = ''; oldCell.className = 'cell'; }, 200);
+                }
+            } else {
+                // Own removal — visually already handled optimistically, just clean up
                 setTimeout(() => {
-                    oldCell.innerHTML = '';
-                    oldCell.className = 'cell';
-                }, 200);
+                    const c = getCell(oldest.index);
+                    if (c) { c.innerHTML = ''; c.className = 'cell'; }
+                }, 210);
             }
         }
 
-        // Place new piece
-        board[index] = { mark, order: moveCount };
+        board[index] = { mark };
         moveOrder.push({ mark, index });
-        renderCell(index, mark, false);
 
-        // Re-evaluate fading indicators for this mark
-        const currentPieces = moveOrder.filter(m => m.mark === mark);
-        currentPieces.forEach((m, i) => {
-            markFading(m.index, i === 0 && currentPieces.length >= 3);
+        // Render opponent piece (ours already rendered optimistically)
+        if (mark !== myMark) {
+            renderCell(index, mark, false);
+        }
+
+        // Update fading indicators
+        const current = moveOrder.filter(m => m.mark === mark);
+        current.forEach((m, i) => {
+            markFading(m.index, i === 0 && current.length >= 3);
         });
     }
+
+    // ── INCOMING MOVE ─────────────────────────────────────────────
+    socket.on('move_made', data => {
+        const { index, mark, game_over, winner, win_line, stats, timeout } = data;
+
+        console.log('[move_made]', JSON.stringify(data));
+
+        if (!timeout && index !== null && index !== undefined) {
+            syncMove(index, mark);
+        }
+
+        if (game_over) {
+            isMyTurn = false;
+            stopTimer();
+
+            if (stats) { userStats = stats; updateStatsDisplay(); }
+
+            if (winner && winner !== 'draw') {
+                matchScore[winner]++;
+                updateMatchPips();
+            }
+
+            console.log('[GAME OVER] winner:', winner, 'line:', win_line);
+
+            setTimeout(() => { if (win_line) highlightWin(win_line); }, 150);
+            setTimeout(() => {
+                const matchOver = matchScore.X >= MATCH_WINS_NEEDED || matchScore.O >= MATCH_WINS_NEEDED;
+                showEndScreen(winner, matchOver);
+            }, 700);
+
+        } else {
+            isMyTurn = (mark !== myMark);
+            startTimer();
+            updateStatus();
+        }
+    });
 
     function renderCell(index, mark, fading) {
         const cell = getCell(index);
@@ -1268,47 +1329,10 @@
         return document.querySelector(`.cell[data-index="${index}"]`);
     }
 
-    // ── INCOMING MOVE ─────────────────────────────────────────────
-    socket.on('move_made', data => {
-        const { index, mark, game_over, winner, win_line, stats, timeout } = data;
-
-        // Apply opponent's move visually (skip if timeout — no piece placed)
-        if (mark !== myMark && index !== null && index !== undefined && !timeout) {
-            applyMove(index, mark);
-        }
-
-        if (game_over) {
-            isMyTurn = false;
-            stopTimer();
-
-            if (stats) { userStats = stats; updateStatsDisplay(); }
-
-            if (winner && winner !== 'draw') {
-                matchScore[winner]++;
-                updateMatchPips();
-            }
-
-            setTimeout(() => {
-                if (win_line) highlightWin(win_line);
-            }, 100);
-
-            setTimeout(() => {
-                const matchOver = matchScore.X >= MATCH_WINS_NEEDED || matchScore.O >= MATCH_WINS_NEEDED;
-                showEndScreen(winner, matchOver);
-            }, 600);
-
-        } else {
-            // It's my turn if the opponent just moved
-            isMyTurn = (mark !== myMark);
-            startTimer();
-            updateStatus();
-        }
-    });
-
     function highlightWin(line) {
         line.forEach(i => {
             const cell = getCell(i);
-            cell.classList.add('win-cell');
+            if (cell) cell.classList.add('win-cell');
         });
     }
 
