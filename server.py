@@ -44,9 +44,10 @@ def authenticate_user(username, password):
     return None
 
 def update_user_stats(username, result):
+    key_map = { 'win': 'wins', 'loss': 'losses', 'draw': 'draws' }
     users = load_users()
     if username in users:
-        users[username][result + 's'] += 1
+        users[username][key_map[result]] += 1
         save_users(users)
         return { 'wins': users[username]['wins'], 'losses': users[username]['losses'], 'draws': users[username]['draws'] }
     return None
