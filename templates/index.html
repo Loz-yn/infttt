@@ -1477,7 +1477,7 @@
         const { index, mark, game_over, winner, win_line, stats, timeout } = data;
         dbg(`move_made: mark=${mark} idx=${index} game_over=${game_over} winner=${winner} timeout=${timeout}`, 'evt');
 
-        if (!timeout && index !== null && index !== undefined) {
+        if (index !== null && index !== undefined) {
             applyServerMove(index, mark);
         }
 
