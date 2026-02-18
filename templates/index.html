@@ -1166,7 +1166,7 @@
     // ═══════════════════════════════════════════════════════
     //  DEBUG CONSOLE
     // ═══════════════════════════════════════════════════════
-    const VERSION = 'v2.3';
+    const VERSION = 'v2.4';
     document.querySelector('.version-tag').textContent = VERSION;
 
     function toggleDebug() {
@@ -1643,6 +1643,11 @@
     }
 
     function leaveGame() {
+        dbg('leaving game', 'warn');
+        // Notify server to cancel any rematch and clean up
+        if (gameId) {
+            socket.emit('leave_game', { game_id: gameId });
+        }
         document.getElementById('endOverlay').classList.remove('show');
         fullReset();
     }
@@ -1674,8 +1679,13 @@
 
     socket.on('rematch_declined', () => {
         dbg('rematch declined — opponent left', 'warn');
-        document.getElementById('rematchWaiting').textContent = 'Opponent left.';
-        setTimeout(() => { document.getElementById('endOverlay').classList.remove('show'); fullReset(); }, 2000);
+        document.getElementById('rematchBtn').style.display = 'none';
+        document.getElementById('rematchWaiting').textContent = 'Opponent left the game.';
+        setTimeout(() => {
+            document.getElementById('endOverlay').classList.remove('show');
+            document.getElementById('rematchBtn').style.display = 'block'; // restore for next time
+            fullReset();
+        }, 2500);
     });
 
     // ═══════════════════════════════════════════════════════

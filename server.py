@@ -399,6 +399,36 @@ def handle_rematch(data):
         del games[game_id]
 
 
+@socketio.on('leave_game')
+def handle_leave_game(data):
+    """Player leaves from end screen — cancel any rematch and clean up."""
+    game_id = data.get('game_id')
+    player_id = request.sid
+
+    print(f"[leave_game] player={player_id} game={game_id}", flush=True)
+
+    if not game_id:
+        return
+
+    # Cancel any pending rematch request
+    if game_id in rematch_requests:
+        rematch_requests[game_id].discard(player_id)
+        # If opponent is waiting, tell them the rematch is declined
+        if len(rematch_requests[game_id]) > 0:
+            print(f"[leave_game] notifying opponent", flush=True)
+            # Get opponent's socket ID
+            if game_id in games:
+                game = games[game_id]
+                opp = game.get_opponent(player_id)
+                socketio.emit('rematch_declined', {}, room=opp, namespace='/')
+        del rematch_requests[game_id]
+
+    # Clean up game
+    if game_id in games:
+        del games[game_id]
+        print(f"[leave_game] game {game_id} deleted", flush=True)
+
+
 # ── CHAT ──────────────────────────────────────────────────────────────────────
 
 @socketio.on('chat_message')
