@@ -1166,7 +1166,7 @@
     // ═══════════════════════════════════════════════════════
     //  DEBUG CONSOLE
     // ═══════════════════════════════════════════════════════
-    const VERSION = 'v2.4';
+    const VERSION = 'v1.5/Alpha';
     document.querySelector('.version-tag').textContent = VERSION;
 
     function toggleDebug() {
@@ -1420,7 +1420,7 @@
     // ═══════════════════════════════════════════════════════
     //  SERVER MOVE — updates board[] and moveOrder[] state
     // ═══════════════════════════════════════════════════════
-    function applyServerMove(index, mark) {
+    function applyServerMove(index, mark, forceRender = false) {
         dbg(`applyServerMove: mark=${mark} index=${index}`, 'move');
         dbg(`  before: order=[${moveOrder.map(m=>m.mark+'@'+m.index).join(',')}]`, 'info');
 
@@ -1434,7 +1434,7 @@
             board[oldest.index] = null;
             moveOrder = moveOrder.filter(m => !(m.mark === mark && m.index === oldest.index));
 
-            if (!isOwnMove) {
+            if (!isOwnMove || forceRender) {
                 // Animate opponent removal visually
                 const oldCell = getCell(oldest.index);
                 if (oldCell) {
