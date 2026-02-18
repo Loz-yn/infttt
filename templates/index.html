@@ -1420,6 +1420,7 @@
     // ═══════════════════════════════════════════════════════
     //  SERVER MOVE — updates board[] and moveOrder[] state
     // ═══════════════════════════════════════════════════════
+    function applyServerMove(index, mark) {
     function applyServerMove(index, mark, forceRender = false) {
         dbg(`applyServerMove: mark=${mark} index=${index}`, 'move');
         dbg(`  before: order=[${moveOrder.map(m=>m.mark+'@'+m.index).join(',')}]`, 'info');
@@ -1434,6 +1435,7 @@
             board[oldest.index] = null;
             moveOrder = moveOrder.filter(m => !(m.mark === mark && m.index === oldest.index));
 
+            if (!isOwnMove) {
             if (!isOwnMove || forceRender) {
                 // Animate opponent removal visually
                 const oldCell = getCell(oldest.index);
@@ -1456,6 +1458,13 @@
 
         // Only render cell for opponent — own piece already shown optimistically
         if (!isOwnMove) {
+        if (!isOwnMove || forceRender) {
+            renderCell(index, mark);
+        }
+
+        // Safety: ensure authoritative server move is always visible locally
+        const placedCell = getCell(index);
+        if (!placedCell || !placedCell.querySelector('.piece')) {
             renderCell(index, mark);
         }
 
@@ -1477,6 +1486,8 @@
         const { index, mark, game_over, winner, win_line, stats, timeout } = data;
         dbg(`move_made: mark=${mark} idx=${index} game_over=${game_over} winner=${winner} timeout=${timeout}`, 'evt');
 
+        if (!timeout && index !== null && index !== undefined) {
+            applyServerMove(index, mark);
         if (index !== null && index !== undefined) {
             applyServerMove(index, mark, Boolean(timeout));
         }
@@ -1504,334 +1515,7 @@
             } else {
                 // Between rounds: just show a message — server auto-starts next round
                 const roundMsg = winner === myMark ? `Round ${roundNumber} — You won! 🎉` : `Round ${roundNumber} — You lost.`;
-                addSysMsg(roundMsg);
-                dbg('waiting for server to start next round...', 'info');
-            }
-
-        } else {
-            isMyTurn = (mark !== myMark);
-            dbg(`turn switch: mark played=${mark}, myMark=${myMark}, isMyTurn=${isMyTurn}`, 'turn');
-            updateStatus();
-            startTimer();
-            dbgUpdateState();
-        }
-    });
-
-    // ═══════════════════════════════════════════════════════
-    //  RENDERING HELPERS
-    // ═══════════════════════════════════════════════════════
-    function renderCell(index, mark) {
-        const cell = getCell(index);
-        if (!cell) { dbg(`renderCell: no cell at ${index}!`, 'err'); return; }
-        cell.classList.add('taken');
-        cell.innerHTML = `<span class="piece ${mark.toLowerCase()} just-placed">${mark}</span>`;
-    }
-
-    function markFading(index, shouldFade) {
-        const cell  = getCell(index);
-        if (!cell) return;
-        const piece = cell.querySelector('.piece');
-        if (!piece) return;
-        if (shouldFade) {
-            cell.classList.add('fading-cell');
-            piece.classList.add('fading');
-        } else {
-            cell.classList.remove('fading-cell');
-            piece.classList.remove('fading');
-        }
-    }
-
-    function getCell(index) {
-        return document.querySelector(`.cell[data-index="${index}"]`);
-    }
-
-    function highlightWin(line) {
-        dbg(`highlighting win line: ${JSON.stringify(line)}`, 'ok');
-        line.forEach(i => {
-            const cell = getCell(i);
-            if (cell) cell.classList.add('win-cell');
-        });
-    }
-
-    // ═══════════════════════════════════════════════════════
-    //  TIMER
-    // ═══════════════════════════════════════════════════════
-    function startTimer() {
-        stopTimer();
-        timerLeft = TURN_TIME;
-        renderTimer();
-        timerInterval = setInterval(() => {
-            timerLeft--;
-            renderTimer();
-            dbgUpdateState();
-            if (timerLeft <= 0) {
-                stopTimer();
-                dbg(`timer expired — isMyTurn=${isMyTurn}`, 'warn');
-                if (isMyTurn && gameId) {
-                    dbg('emitting timeout', 'warn');
-                    isMyTurn = false;
-                    socket.emit('timeout', { game_id: gameId });
-                    dbgUpdateState();
-                }
-            }
-        }, 1000);
-    }
-
-    function stopTimer() {
-        if (timerInterval) {
-            clearInterval(timerInterval);
-            timerInterval = null;
-        }
-    }
-
-    function renderTimer() {
-        const fill = document.getElementById('timerFill');
-        const num  = document.getElementById('timerNum');
-        const pct  = (timerLeft / TURN_TIME) * 100;
-        fill.style.width = pct + '%';
-        num.textContent  = timerLeft;
-        const urgent = timerLeft <= 5;
-        fill.classList.toggle('urgent', urgent);
-        num.classList.toggle('urgent', urgent);
-    }
-
-    // ═══════════════════════════════════════════════════════
-    //  MATCH PIPS
-    // ═══════════════════════════════════════════════════════
-    function updateMatchPips() {
-        ['X', 'O'].forEach(mark => {
-            const wins = matchScore[mark];
-            const p    = mark.toLowerCase();
-            for (let i = 0; i < 2; i++) {
-                const pip = document.getElementById(`${p}Pip${i}`);
-                if (pip) pip.className = 'match-pip' + (i < wins ? ` won-${p}` : '');
-            }
-        });
-    }
-
-    // ═══════════════════════════════════════════════════════
-    //  END SCREEN / REMATCH
-    // ═══════════════════════════════════════════════════════
-    function showEndScreen(winner, matchOver) {
-        const isWinner = winner === myMark;
-        const isDraw   = winner === 'draw';
-        dbg(`showEndScreen: winner=${winner} myMark=${myMark} matchOver=${matchOver}`, 'state');
-
-        document.getElementById('endEmoji').textContent  = isWinner ? '🏆' : isDraw ? '🤝' : '😞';
-        document.getElementById('endTitle').textContent  = isWinner ? 'You Won!' : isDraw ? 'Draw!' : 'You Lost';
-        document.getElementById('endTitle').style.color  = isWinner ? 'var(--accent)' : isDraw ? 'var(--text)' : 'var(--muted)';
-
-        const myScore  = matchScore[myMark];
-        const oppScore = matchScore[myMark === 'X' ? 'O' : 'X'];
-        document.getElementById('endMatchScore').innerHTML = `Match: <span>${myScore}</span> — <span>${oppScore}</span>`;
-        document.getElementById('endSub').textContent = matchOver
-            ? (isWinner ? 'You won the match! 🎉' : `${opponentName} won the match`)
-            : `Round ${roundNumber} of 3`;
-        document.getElementById('rematchBtn').textContent = matchOver ? 'New Match' : 'Next Round';
-        document.getElementById('rematchBtn').disabled    = false;
-        document.getElementById('rematchWaiting').textContent = '';
-
-        addSysMsg(isWinner ? 'You won! 🎉' : isDraw ? 'Draw!' : 'You lost.');
-        document.getElementById('endOverlay').classList.add('show');
-    }
-
-    function requestRematch() {
-        dbg('requesting rematch', 'info');
-        document.getElementById('rematchBtn').disabled = true;
-        document.getElementById('rematchWaiting').textContent = 'Waiting for opponent...';
-        socket.emit('rematch_request', { game_id: gameId });
-    }
-
-    function leaveGame() {
-        dbg('leaving game', 'warn');
-        // Notify server to cancel any rematch and clean up
-        if (gameId) {
-            socket.emit('leave_game', { game_id: gameId });
-        }
-        document.getElementById('endOverlay').classList.remove('show');
-        fullReset();
-    }
-
-    socket.on('rematch_start', data => {
-        dbg(`rematch_start: mark=${data.mark} first=${data.first_turn} new_match=${data.new_match}`, 'evt');
-        gameId       = data.game_id;
-        myMark       = data.mark;
-        opponentName = data.opponent_name || opponentName;
-        isMyTurn     = (data.first_turn === myMark);
-
-        if (data.new_match) { matchScore = { X: 0, O: 0 }; roundNumber = 0; }
-        roundNumber++;
-        board     = Array(9).fill(null);
-        moveOrder = [];
-
-        document.getElementById('xPlayer').textContent = data.x_player;
-        document.getElementById('oPlayer').textContent = data.o_player;
-        document.getElementById('endOverlay').classList.remove('show');
-
-        updateMatchPips();
-        resetBoardDOM();
-        updateStatus();
-        startTimer();
-        addSysMsg(`⚡ Round ${roundNumber} — You are ${myMark}. ${isMyTurn ? 'You go first!' : `${opponentName} goes first.`}`);
-        dbg(`round ${roundNumber} started — I am ${myMark}, my turn: ${isMyTurn}`, 'ok');
-        dbgUpdateState();
-    });
-
-    socket.on('rematch_declined', () => {
-        dbg('rematch declined — opponent left', 'warn');
-        document.getElementById('rematchBtn').style.display = 'none';
-        document.getElementById('rematchWaiting').textContent = 'Opponent left the game.';
-        setTimeout(() => {
-            document.getElementById('endOverlay').classList.remove('show');
-            document.getElementById('rematchBtn').style.display = 'block'; // restore for next time
-            fullReset();
-        }, 2500);
-    });
-
-    // ═══════════════════════════════════════════════════════
-    //  FULL RESET
-    // ═══════════════════════════════════════════════════════
-    function fullReset() {
-        dbg('fullReset()', 'warn');
-        stopTimer();
-        document.getElementById('findGameBtn').style.display = 'block';
-        document.getElementById('gameLayout').classList.remove('show');
-        document.getElementById('playersBar').classList.remove('show');
-        document.getElementById('matchBar').classList.remove('show');
-        document.getElementById('timerBar').classList.remove('show');
-        document.getElementById('endOverlay').classList.remove('show');
-        document.getElementById('chatMessages').innerHTML = '';
-        resetBoardDOM();
-        board     = Array(9).fill(null);
-        moveOrder = [];
-        matchScore  = { X: 0, O: 0 };
-        roundNumber = 0;
-        gameId      = null;
-        myMark      = null;
-        isMyTurn    = false;
-        opponentName = null;
-        setStatus('Click Find Game to start', 'waiting');
-        dbgUpdateState();
-    }
-
-    // ═══════════════════════════════════════════════════════
-    //  STATUS
-    // ═══════════════════════════════════════════════════════
-    function setStatus(msg, cls) {
-        const el = document.getElementById('status');
-        el.textContent = msg;
-        el.className = cls;
-    }
-
-    function updateStatus() {
-        const xEl = document.getElementById('xPlayer');
-        const oEl = document.getElementById('oPlayer');
-        if (xEl && oEl) {
-            if (myMark === 'X') {
-                xEl.classList.toggle('active', isMyTurn);
-                oEl.classList.toggle('active', !isMyTurn);
-            } else {
-                oEl.classList.toggle('active', isMyTurn);
-                xEl.classList.toggle('active', !isMyTurn);
-            }
-        }
-        if (isMyTurn) setStatus('Your turn', 'your-turn');
-        else if (gameId) setStatus(`${opponentName || 'Opponent'}'s turn...`, 'opp-turn');
-    }
-
-    // ═══════════════════════════════════════════════════════
-    //  DISCONNECT
-    // ═══════════════════════════════════════════════════════
-    socket.on('opponent_disconnected', () => {
-        dbg('opponent disconnected', 'warn');
-        stopTimer();
-        addSysMsg('Opponent disconnected.');
-        setStatus('Opponent disconnected', 'waiting');
-        setTimeout(fullReset, 2500);
-    });
-
-    socket.on('error', data => {
-        dbg(`SERVER ERROR: ${data.message}`, 'err');
-        console.error('Server error:', data.message);
-    });
-
-    // ═══════════════════════════════════════════════════════
-    //  CHAT
-    // ═══════════════════════════════════════════════════════
-    function sendMessage() {
-        const input = document.getElementById('chatInput');
-        const msg   = input.value.trim();
-        if (!msg || !gameId) return;
-        socket.emit('chat_message', { game_id: gameId, message: msg, sender: username });
-        addMsg(username, msg, true);
-        input.value = '';
-    }
-
-    socket.on('chat_message', data => {
-        addMsg(data.sender, data.message, false);
-        if (isChatMinimized) {
-            unreadCount++;
-            document.getElementById('unreadPill').style.display = 'inline-block';
-            document.getElementById('unreadPill').textContent = unreadCount;
-        }
-    });
-
-    function addMsg(sender, text, own) {
-        const wrap = document.getElementById('chatMessages');
-        const div  = document.createElement('div');
-        div.className = `msg ${own ? 'own' : 'opp'}`;
-        const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        div.innerHTML = `<div class="msg-sender">${sender}</div><div class="msg-bubble">${escHtml(text)}</div><div class="msg-time">${time}</div>`;
-        wrap.appendChild(div);
-        wrap.scrollTop = wrap.scrollHeight;
-    }
-
-    function addSysMsg(text) {
-        const wrap = document.getElementById('chatMessages');
-        const div  = document.createElement('div');
-        div.className = 'sys-msg';
-        div.textContent = text;
-        wrap.appendChild(div);
-        wrap.scrollTop = wrap.scrollHeight;
-    }
-
-    function toggleChat() {
-        isChatMinimized = !isChatMinimized;
-        const msgs = document.getElementById('chatMessages');
-        const row  = document.getElementById('chatInputRow');
-        const btn  = document.querySelector('.chat-toggle-btn');
-        msgs.style.display = isChatMinimized ? 'none' : 'flex';
-        row.style.display  = isChatMinimized ? 'none' : 'flex';
-        btn.textContent    = isChatMinimized ? 'Expand' : 'Minimize';
-        if (!isChatMinimized) {
-            unreadCount = 0;
-            document.getElementById('unreadPill').style.display = 'none';
-        }
-    }
-
-    function escHtml(t) {
-        const d = document.createElement('div');
-        d.textContent = t;
-        return d.innerHTML;
-    }
-
-    // ═══════════════════════════════════════════════════════
-    //  LEADERBOARD
-    // ═══════════════════════════════════════════════════════
-    function showLeaderboard() {
-        document.getElementById('lbModal').classList.add('show');
-        socket.emit('get_leaderboard');
-    }
-
-    function closeLeaderboard() {
-        document.getElementById('lbModal').classList.remove('show');
-    }
-
-    socket.on('leaderboard_data', data => {
-        const tbody = document.getElementById('lbBody');
-        tbody.innerHTML = '';
-        if (!data.leaderboard.length) {
-            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:24px">No players yet</td></tr>';
+@@ -1835,26 +1841,26 @@
             return;
         }
         data.leaderboard.forEach((p, i) => {
@@ -1857,4 +1541,5 @@
 </script>
 
 </body>
+</html>
 </html>
