@@ -1478,7 +1478,7 @@
         dbg(`move_made: mark=${mark} idx=${index} game_over=${game_over} winner=${winner} timeout=${timeout}`, 'evt');
 
         if (index !== null && index !== undefined) {
-            applyServerMove(index, mark);
+            applyServerMove(index, mark, Boolean(timeout));
         }
 
         if (game_over) {
