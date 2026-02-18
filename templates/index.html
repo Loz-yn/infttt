@@ -1455,7 +1455,13 @@
         moveOrder.push({ mark, index });
 
         // Only render cell for opponent — own piece already shown optimistically
-        if (!isOwnMove) {
+        if (!isOwnMove || forceRender) {
+            renderCell(index, mark);
+        }
+
+        // Safety: ensure authoritative server move is always visible locally
+        const placedCell = getCell(index);
+        if (!placedCell || !placedCell.querySelector('.piece')) {
             renderCell(index, mark);
         }
 
