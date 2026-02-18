@@ -312,34 +312,69 @@ def _start_next_round(game_id):
 
 @socketio.on('timeout')
 def handle_timeout(data):
-    """Player ran out of time — forfeit the round."""
+    """Player ran out of time — make a random move for them."""
     game_id = data.get('game_id')
     player_id = request.sid
 
+    print(f"[timeout] player={player_id} game={game_id}", flush=True)
+
     if game_id not in games:
-        return  # Already handled (e.g. other player also timed out)
+        print(f"[timeout] game not found", flush=True)
+        return
 
     game = games[game_id]
     mark = game.get_mark(player_id)
 
     # Only the player whose turn it is can time out
     if game.turn != mark:
+        print(f"[timeout] not this player's turn", flush=True)
         return
 
-    winner = 'O' if mark == 'X' else 'X'
+    # Find all empty cells
+    empty_cells = [i for i in range(9) if game.board[i] is None]
 
-    # Delete game immediately to prevent double-timeout
-    del games[game_id]
+    if not empty_cells:
+        print(f"[timeout] no empty cells!", flush=True)
+        return
 
-    game.match_score[winner] += 1
-    stats_x = update_user_stats(game.x_username, 'win' if winner == 'X' else 'loss')
-    stats_o = update_user_stats(game.o_username, 'win' if winner == 'O' else 'loss')
+    # Pick a random empty cell
+    import random
+    random_index = random.choice(empty_cells)
 
-    payload = {'index': None, 'mark': mark, 'removed_index': None,
-               'game_over': True, 'winner': winner, 'win_line': None, 'timeout': True}
+    print(f"[timeout] auto-placing {mark} at {random_index}", flush=True)
 
-    emit('move_made', {**payload, 'stats': stats_x}, room=game.x_player)
-    emit('move_made', {**payload, 'stats': stats_o}, room=game.o_player)
+    # Make the move (use the same logic as handle_make_move)
+    success, removed_index, game_over, winner, win_line = game.make_move(random_index, mark)
+
+    if not success:
+        print(f"[timeout] move failed!", flush=True)
+        return
+
+    stats_x = stats_o = None
+    if game_over and winner:
+        game.match_score[winner] += 1
+        stats_x = update_user_stats(game.x_username, 'win' if winner == 'X' else 'loss')
+        stats_o = update_user_stats(game.o_username, 'win' if winner == 'O' else 'loss')
+
+    payload_base = {
+        'index': random_index,
+        'mark': mark,
+        'removed_index': removed_index,
+        'game_over': game_over,
+        'winner': winner,
+        'win_line': list(win_line) if win_line else None,
+        'timeout': True  # Signal this was an auto-move
+    }
+
+    socketio.emit('move_made', {**payload_base, 'stats': stats_x}, room=game.x_player, namespace='/')
+    socketio.emit('move_made', {**payload_base, 'stats': stats_o}, room=game.o_player, namespace='/')
+
+    # If round ended but match not over, auto-start next round
+    if game_over:
+        match_over = game.match_score['X'] >= MATCH_WINS_NEEDED or game.match_score['O'] >= MATCH_WINS_NEEDED
+        if not match_over:
+            socketio.sleep(1.5)
+            _start_next_round(game_id)
 
 
 # ── REMATCH ───────────────────────────────────────────────────────────────────
