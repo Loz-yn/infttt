@@ -291,9 +291,10 @@ def _start_next_round(game_id):
     new_game.o_username = game.o_username
     new_game.match_score = dict(game.match_score)
     new_game.round = game.round
+    new_game.turn = first  # SET THE CORRECT STARTING TURN
     games[new_game_id] = new_game
 
-    print(f"[next_round] emitting to X sid={game.x_player}", flush=True)
+    print(f"[next_round] new game turn={new_game.turn} emitting to X sid={game.x_player}", flush=True)
     socketio.emit('rematch_start', {
         'game_id': new_game_id, 'mark': 'X', 'first_turn': first, 'new_match': False,
         'opponent_name': game.o_username, 'x_player': game.x_username, 'o_player': game.o_username
