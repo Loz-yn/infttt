@@ -1,14 +1,3 @@
 {
-  "Lzn": {
-    "password": "scrypt:32768:8:1$khBYEj9XGfeeerky$f66c7d3d10e393a4eed0dd7e02a6188c56c01cf2f366fff5d71c9f47e3c3b22a0733e5f76ceb85631c629dac1b8d68253a7b0c6363727551d5665c068f39fca2",
-    "wins": 1,
-    "losses": 0,
-    "draws": 0
-  },
-  "TheGreatest": {
-    "password": "scrypt:32768:8:1$vEjYPvLCFoWdjnpQ$0c8c7e50a5e002aa5b00c32b2285cfeff81c8ac494a9d4dad91ce5514abd94a600ca1901f02f062a72f0a1bfad71c804623062214de9f096aa0aebd320343b3a",
-    "wins": 0,
-    "losses": 0,
-    "draws": 0
-  }
+  
 }

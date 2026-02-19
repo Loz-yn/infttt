@@ -2,12 +2,13 @@ from flask import Flask, render_template, request
 from flask_socketio import SocketIO, emit, join_room
 import uuid, json, os
 from werkzeug.security import generate_password_hash, check_password_hash
+import psycopg2
+import psycopg2.extras
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'ttt_secret_key'
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
-DB_FILE = 'ttt_users.json'
 games = {}
 waiting_room = []
 player_usernames = {}
@@ -17,30 +18,41 @@ rematch_requests = {}  # game_id -> set of player sids who requested rematch
 
 # ── DATABASE ──────────────────────────────────────────────────────────────────
 
-def load_users():
-    if os.path.exists(DB_FILE):
-        with open(DB_FILE, 'r') as f:
-            return json.load(f)
-    return {}
+def get_conn():
+    return psycopg2.connect(os.environ['DATABASE_URL'], sslmode='require')
 
-
-def save_users(users):
-    with open(DB_FILE, 'w') as f:
-        json.dump(users, f, indent=2)
-
+def init_db():
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS users (
+                    username TEXT PRIMARY KEY,
+                    password TEXT NOT NULL,
+                    wins INTEGER DEFAULT 0,
+                    losses INTEGER DEFAULT 0,
+                    draws INTEGER DEFAULT 0
+                )
+            ''')
+        conn.commit()
 
 def get_user(username):
-    return load_users().get(username)
-
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT * FROM users WHERE username = %s", (username,))
+            return cur.fetchone()
 
 def create_user(username, password):
-    users = load_users()
-    if username in users:
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO users (username, password) VALUES (%s, %s)",
+                    (username, generate_password_hash(password))
+                )
+            conn.commit()
+        return True
+    except psycopg2.errors.UniqueViolation:
         return False
-    users[username] = {'password': generate_password_hash(password), 'wins': 0, 'losses': 0, 'draws': 0}
-    save_users(users)
-    return True
-
 
 def authenticate_user(username, password):
     user = get_user(username)
@@ -48,15 +60,21 @@ def authenticate_user(username, password):
         return {'username': username, 'wins': user['wins'], 'losses': user['losses'], 'draws': user['draws']}
     return None
 
-
 def update_user_stats(username, result):
     key_map = {'win': 'wins', 'loss': 'losses', 'draw': 'draws'}
-    users = load_users()
-    if username in users:
-        users[username][key_map[result]] += 1
-        save_users(users)
-        return {'wins': users[username]['wins'], 'losses': users[username]['losses'], 'draws': users[username]['draws']}
-    return None
+    col = key_map[result]
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"UPDATE users SET {col} = {col} + 1 WHERE username = %s", (username,))
+        conn.commit()
+    user = get_user(username)
+    return {'wins': user['wins'], 'losses': user['losses'], 'draws': user['draws']}
+
+def get_leaderboard():
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT username, wins, losses, draws FROM users ORDER BY wins DESC")
+            return [dict(row) for row in cur.fetchall()]
 
 
 def get_leaderboard():
@@ -502,6 +520,7 @@ def handle_disconnect():
             del games[game_id]
             break
 
+init_db()
 
 if __name__ == '__main__':
     import os

@@ -2,3 +2,4 @@ flask
 flask-socketio
 werkzeug
 eventlet
+psycopg2-binary
