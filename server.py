@@ -198,7 +198,19 @@ def handle_find_game(data):
     username = data.get('username', 'Anonymous')
     player_usernames[player_id] = username
 
-    if waiting_room:
+    if player_id in waiting_room:
+        emit('waiting', {'message': 'Still searching for opponent...'})
+        return
+
+        # Find the first valid opponent that is not this same socket.
+    opp_id = None
+    while waiting_room:
+        candidate = waiting_room.pop(0)
+        if candidate != player_id:
+            opp_id = candidate
+            break
+
+    if opp_id:
         opp_id = waiting_room.pop(0)
         opp_username = player_usernames.get(opp_id, 'Anonymous')
         game_id = str(uuid.uuid4())
