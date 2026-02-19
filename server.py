@@ -198,30 +198,7 @@ def handle_find_game(data):
     username = data.get('username', 'Anonymous')
     player_usernames[player_id] = username
 
-    if any(player_id in (g.x_player, g.o_player) for g in games.values()):
-        emit('waiting', {'message': 'You are already in a game.'})
-        return
-
-        # Ignore duplicate queue attempts from the same socket.
-    if player_id in waiting_room:
-        emit('waiting', {'message': 'Still searching for opponent...'})
-        return
-
-        # Find the first valid opponent that is not this same socket and is still connected.
-    opp_id = None
-    while waiting_room:
-        candidate = waiting_room.pop(0)
-        if candidate == player_id:
-            continue
-        if any(candidate in (g.x_player, g.o_player) for g in games.values()):
-            continue
-        if not socketio.server.manager.is_connected(candidate, '/'):
-            player_usernames.pop(candidate, None)
-            continue
-        opp_id = candidate
-        break
-
-    if opp_id:
+    if waiting_room:
         opp_id = waiting_room.pop(0)
         opp_username = player_usernames.get(opp_id, 'Anonymous')
         game_id = str(uuid.uuid4())
