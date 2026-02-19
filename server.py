@@ -7,7 +7,7 @@ import psycopg2.extras
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'ttt_secret_key'
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='gevent')
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='gevent', manage_session=False)
 
 games = {}
 waiting_room = []
@@ -19,7 +19,11 @@ rematch_requests = {}  # game_id -> set of player sids who requested rematch
 # ── DATABASE ──────────────────────────────────────────────────────────────────
 
 def get_conn():
-    return psycopg2.connect(os.environ['DATABASE_URL'], sslmode='require')
+    url = os.environ['DATABASE_URL']
+    # Railway uses postgres:// but psycopg2 needs postgresql://
+    if url.startswith('postgres://'):
+        url = url.replace('postgres://', 'postgresql://', 1)
+    return psycopg2.connect(url)
 
 def init_db():
     with get_conn() as conn:
