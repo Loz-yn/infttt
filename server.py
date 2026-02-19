@@ -7,7 +7,7 @@ import psycopg2.extras
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'ttt_secret_key'
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='gevent')
 
 games = {}
 waiting_room = []
@@ -75,14 +75,6 @@ def get_leaderboard():
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("SELECT username, wins, losses, draws FROM users ORDER BY wins DESC")
             return [dict(row) for row in cur.fetchall()]
-
-
-def get_leaderboard():
-    users = load_users()
-    lb = [{'username': u, **{k: v for k, v in d.items() if k != 'password'}} for u, d in users.items()]
-    lb.sort(key=lambda x: (x['wins'], x['wins'] / max(x['wins'] + x['losses'] + x['draws'], 1)), reverse=True)
-    return lb
-
 
 # ── GAME CLASS ────────────────────────────────────────────────────────────────
 
@@ -526,4 +518,4 @@ if __name__ == '__main__':
     import os
 
     port = int(os.environ.get('PORT', 5000))
-    socketio.run(app, host='0.0.0.0', port=port, debug=False)
+    socketio.run(app, host='0.0.0.0', port=port, debug=False, allow_unsafe_werkzeug=True)
