@@ -236,7 +236,7 @@ def handle_login(data):
     if user_data:
         active_sessions[request.sid] = username
         emit('login_success', {'username': username, 'stats': {'wins': user_data['wins'], 'losses': user_data['losses'],
-                                                               'draws': user_data['draws']}})
+                                                               'rank': user_data['rank']}})
     else:
         user = get_user(username)
         if user:
@@ -244,7 +244,7 @@ def handle_login(data):
         else:
             if create_user(username, password):
                 active_sessions[request.sid] = username
-                emit('login_success', {'username': username, 'stats': {'wins': 0, 'losses': 0, 'draws': 0}})
+                emit('login_success', {'username': username, 'stats': {'wins': 0, 'losses': 0, 'rank': 1000}})
             else:
                 emit('login_failed', {'message': 'Failed to create account!'})
 
