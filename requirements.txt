@@ -1,6 +1,6 @@
 flask
 flask-socketio
+werkzeug
 gevent
 gevent-websocket
-werkzeug
 psycopg2-binary

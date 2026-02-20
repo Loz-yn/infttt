@@ -25,25 +25,50 @@ def get_conn():
         url = url.replace('postgres://', 'postgresql://', 1)
     return psycopg2.connect(url)
 
+
 def init_db():
     with get_conn() as conn:
         with conn.cursor() as cur:
+            # Create users table with rank instead of draws
             cur.execute('''
                 CREATE TABLE IF NOT EXISTS users (
                     username TEXT PRIMARY KEY,
                     password TEXT NOT NULL,
                     wins INTEGER DEFAULT 0,
                     losses INTEGER DEFAULT 0,
-                    draws INTEGER DEFAULT 0
+                    rank INTEGER DEFAULT 1000
                 )
             ''')
+            # Migrate existing users: remove draws column if it exists, add rank if missing
+            cur.execute('''
+                DO $$ 
+                BEGIN
+                    -- Drop draws column if it exists
+                    IF EXISTS (
+                        SELECT 1 FROM information_schema.columns 
+                        WHERE table_name = 'users' AND column_name = 'draws'
+                    ) THEN
+                        ALTER TABLE users DROP COLUMN draws;
+                    END IF;
+
+                    -- Add rank column if it doesn't exist
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns 
+                        WHERE table_name = 'users' AND column_name = 'rank'
+                    ) THEN
+                        ALTER TABLE users ADD COLUMN rank INTEGER DEFAULT 1000;
+                    END IF;
+                END $$;
+            ''')
         conn.commit()
+
 
 def get_user(username):
     with get_conn() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("SELECT * FROM users WHERE username = %s", (username,))
             return cur.fetchone()
+
 
 def create_user(username, password):
     try:
@@ -58,27 +83,61 @@ def create_user(username, password):
     except psycopg2.errors.UniqueViolation:
         return False
 
+
 def authenticate_user(username, password):
     user = get_user(username)
     if user and check_password_hash(user['password'], password):
-        return {'username': username, 'wins': user['wins'], 'losses': user['losses'], 'draws': user['draws']}
+        return {'username': username, 'wins': user['wins'], 'losses': user['losses'], 'rank': user['rank']}
     return None
 
-def update_user_stats(username, result):
-    key_map = {'win': 'wins', 'loss': 'losses', 'draw': 'draws'}
-    col = key_map[result]
+
+def update_user_stats(username, result, opponent_username=None):
+    """
+    Update user stats with ELO-style ranking system
+    result: 'win' or 'loss'
+    """
+    K_FACTOR = 32  # How much rank changes per game
+
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute(f"UPDATE users SET {col} = {col} + 1 WHERE username = %s", (username,))
+            # Update wins/losses
+            if result == 'win':
+                cur.execute("UPDATE users SET wins = wins + 1 WHERE username = %s", (username,))
+            else:  # loss
+                cur.execute("UPDATE users SET losses = losses + 1 WHERE username = %s", (username,))
+
+            # Calculate rank change if we have opponent info
+            if opponent_username:
+                cur.execute("SELECT rank FROM users WHERE username = %s", (username,))
+                user_rank = cur.fetchone()[0]
+
+                cur.execute("SELECT rank FROM users WHERE username = %s", (opponent_username,))
+                opp_rank = cur.fetchone()[0]
+
+                # ELO formula
+                expected_score = 1 / (1 + 10 ** ((opp_rank - user_rank) / 400))
+                actual_score = 1 if result == 'win' else 0
+                rank_change = int(K_FACTOR * (actual_score - expected_score))
+
+                # Update rank (minimum 0)
+                cur.execute(
+                    "UPDATE users SET rank = GREATEST(0, rank + %s) WHERE username = %s",
+                    (rank_change, username)
+                )
+
         conn.commit()
+
     user = get_user(username)
-    return {'wins': user['wins'], 'losses': user['losses'], 'draws': user['draws']}
+    return {'wins': user['wins'], 'losses': user['losses'], 'rank': user['rank']}
+
 
 def get_leaderboard():
     with get_conn() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute("SELECT username, wins, losses, draws FROM users ORDER BY wins DESC")
+            cur.execute("SELECT username, wins, losses, rank FROM users ORDER BY rank DESC, wins DESC LIMIT 100")
+            return list(cur.fetchall())
             return [dict(row) for row in cur.fetchall()]
+
 
 # ── GAME CLASS ────────────────────────────────────────────────────────────────
 
@@ -277,8 +336,17 @@ def handle_make_move(data):
         stats_x = stats_o = None
         if game_over and winner:
             game.match_score[winner] += 1
-            stats_x = update_user_stats(game.x_username, 'win' if winner == 'X' else 'loss')
-            stats_o = update_user_stats(game.o_username, 'win' if winner == 'O' else 'loss')
+            # Update both players' stats with opponent info for ELO calculation
+            stats_x = update_user_stats(
+                game.x_username,
+                'win' if winner == 'X' else 'loss',
+                opponent_username=game.o_username
+            )
+            stats_o = update_user_stats(
+                game.o_username,
+                'win' if winner == 'O' else 'loss',
+                opponent_username=game.x_username
+            )
             print(f"[make_move] stats updated x={stats_x} o={stats_o}", flush=True)
 
         payload_base = {'index': index, 'mark': mark, 'removed_index': removed_index,
@@ -389,8 +457,16 @@ def handle_timeout(data):
     stats_x = stats_o = None
     if game_over and winner:
         game.match_score[winner] += 1
-        stats_x = update_user_stats(game.x_username, 'win' if winner == 'X' else 'loss')
-        stats_o = update_user_stats(game.o_username, 'win' if winner == 'O' else 'loss')
+        stats_x = update_user_stats(
+            game.x_username,
+            'win' if winner == 'X' else 'loss',
+            opponent_username=game.o_username
+        )
+        stats_o = update_user_stats(
+            game.o_username,
+            'win' if winner == 'O' else 'loss',
+            opponent_username=game.x_username
+        )
 
     payload_base = {
         'index': random_index,
@@ -537,6 +613,7 @@ def handle_disconnect():
                 del rematch_requests[game_id]
             del games[game_id]
             break
+
 
 init_db()
 

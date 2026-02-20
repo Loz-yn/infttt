@@ -1020,7 +1020,7 @@
                     <div class="user-stats-bar">
                         <span class="stat-w">W: <span id="userWins">0</span></span> ·
                         <span class="stat-l">L: <span id="userLosses">0</span></span> ·
-                        <span class="stat-d">D: <span id="userDraws">0</span></span>
+                        <span class="stat-r">Rank: <span id="userRank">1000</span></span>
                     </div>
                 </div>
             </div>
@@ -1128,10 +1128,9 @@
                     <tr>
                         <th>#</th>
                         <th>Player</th>
+                        <th>Rank</th>
                         <th>Wins</th>
                         <th>Losses</th>
-                        <th>Draws</th>
-                        <th>Win %</th>
                     </tr>
                 </thead>
                 <tbody id="lbBody">
@@ -1166,7 +1165,7 @@
     // ═══════════════════════════════════════════════════════
     //  DEBUG CONSOLE
     // ═══════════════════════════════════════════════════════
-    const VERSION = 'v1.65/Alpha - Sounds';
+    const VERSION = 'v1.7/Alpha - Rank System';
     document.querySelector('.version-tag').textContent = VERSION;
 
     function toggleDebug() {
@@ -1222,7 +1221,7 @@
     let username     = null;
     let opponentName = null;
     let isMyTurn     = false;
-    let userStats    = { wins: 0, losses: 0, draws: 0 };
+    let userStats    = { wins: 0, losses: 0, rank: 1000 };
     let isChatMinimized = false;
     let unreadCount  = 0;
 
@@ -1326,7 +1325,7 @@
     function updateStatsDisplay() {
         document.getElementById('userWins').textContent   = userStats.wins;
         document.getElementById('userLosses').textContent = userStats.losses;
-        document.getElementById('userDraws').textContent  = userStats.draws;
+        document.getElementById('userRank').textContent   = userStats.rank;
     }
 
     // ═══════════════════════════════════════════════════════
@@ -1863,22 +1862,21 @@
         const tbody = document.getElementById('lbBody');
         tbody.innerHTML = '';
         if (!data.leaderboard.length) {
-            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:24px">No players yet</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:24px">No players yet</td></tr>';
             return;
         }
         data.leaderboard.forEach((p, i) => {
-            const total   = p.wins + p.losses + p.draws;
-            const winRate = total ? ((p.wins / total) * 100).toFixed(1) : '0.0';
-            const rank    = i + 1;
-            const rankCls = rank <= 3 ? `rank-${rank}` : '';
+            const position = i + 1;
+            const rankCls = position <= 3 ? `rank-${position}` : '';
             const isMe    = p.username === username;
             const tr      = document.createElement('tr');
             if (isMe) tr.classList.add('lb-me-row');
             tr.innerHTML = `
-                <td class="rank-num ${rankCls}">${rank}</td>
+                <td class="rank-num ${rankCls}">${position}</td>
                 <td class="${isMe ? 'lb-you' : ''}">${p.username}${isMe ? ' ← you' : ''}</td>
-                <td>${p.wins}</td><td>${p.losses}</td><td>${p.draws}</td>
-                <td class="lb-winrate">${winRate}%</td>`;
+                <td><strong>${p.rank}</strong></td>
+                <td>${p.wins}</td>
+                <td>${p.losses}</td>`;
             tbody.appendChild(tr);
         });
     });
