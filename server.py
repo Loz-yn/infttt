@@ -6,8 +6,8 @@ import psycopg2
 import psycopg2.extras
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'ttt_secret_key'
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='gevent', manage_session=False)
+app.config['SECRET_KEY'] = "ttt-secretkey"
+socketio = SocketIO(app, cors_allowed_origins=os.environ.get('ALLOWED_ORIGIN', '*'), async_mode='gevent', manage_session=False)
 
 games = {}
 waiting_casual = []        # queue for casual (no MMR change)
@@ -210,7 +210,7 @@ def update_user_stats(username, result, opponent_username=None):
                 cur.execute("UPDATE users SET losses = losses + 1 WHERE username = %s", (username,))
 
             if opponent_username:
-                cur.execute("SELECT rank, wins, losses, demotion_shield FROM users WHERE username = %s", (username,))
+                cur.execute("SELECT rank, wins, losses, demotion_shield FROM users WHERE username = %s FOR UPDATE", (username,))
                 row = cur.fetchone()
                 user_rank, user_wins, user_losses, shield = row
                 shield = shield if shield is not None else DEMOTION_SHIELD_MAX
@@ -310,7 +310,6 @@ def get_leaderboard():
     with get_conn() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("SELECT username, wins, losses, rank FROM users ORDER BY rank DESC, wins DESC LIMIT 100")
-            return list(cur.fetchall())
             return [dict(row) for row in cur.fetchall()]
 
 
@@ -437,11 +436,33 @@ def _kick_existing_session(username):
 
 @socketio.on('login')
 def handle_login(data):
-    username = data.get('username', '').strip()
-    password = data.get('password', '').strip()
+    username = data.get('username', '')
+    password = data.get('password', '')
+    if not isinstance(username, str) or not isinstance(password, str):
+        emit('login_failed', {'message': 'Invalid input.'})
+        return
+    username = username.strip()
+    password = password.strip()
     if not username or not password:
         emit('login_failed', {'message': 'Username and password required!'})
         return
+    if len(username) > 20:
+        emit('login_failed', {'message': 'Username too long (max 20 chars).'})
+        return
+    if len(password) > 72:
+        # bcrypt silently truncates at 72 bytes; enforce here to prevent DoS
+        emit('login_failed', {'message': 'Password too long (max 72 chars).'})
+        return
+    # Rate limit: max LOGIN_MAX attempts per LOGIN_WINDOW seconds per socket
+    now = time.time()
+    attempts = login_attempts.get(request.sid, [])
+    attempts = [t for t in attempts if now - t < LOGIN_WINDOW]
+    if len(attempts) >= LOGIN_MAX:
+        emit('login_failed', {'message': f'Too many attempts. Wait {LOGIN_WINDOW}s.'})
+        return
+    attempts.append(now)
+    login_attempts[request.sid] = attempts
+
     user_data = authenticate_user(username, password)
     if user_data:
         # Kick any existing session for this user before creating a new one
@@ -453,7 +474,7 @@ def handle_login(data):
     else:
         user = get_user(username)
         if user:
-            emit('login_failed', {'message': 'Incorrect password!'})
+            emit('login_failed', {'message': 'Invalid username or password.'})
         else:
             if create_user(username, password):
                 _kick_existing_session(username)
@@ -543,6 +564,11 @@ import time
 last_move_time = {}
 MOVE_COOLDOWN = 0.2  # 200ms minimum between moves per player
 
+# Login rate limiting: max 5 attempts per 30s per socket
+login_attempts = {}   # sid -> [timestamp, ...]
+LOGIN_MAX = 5
+LOGIN_WINDOW = 30
+
 
 @socketio.on('make_move')
 def handle_make_move(data):
@@ -555,7 +581,12 @@ def handle_make_move(data):
     # ═══════════════════════════════════════════════════════════════
 
     # Validate data types to prevent injection attacks
-    if not isinstance(game_id, str):
+    if not isinstance(game_id, str) or len(game_id) != 36:
+        emit('error', {'message': 'Invalid game ID format'})
+        return
+    # Validate UUID format (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
+    import re as _re
+    if not _re.match(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', game_id):
         emit('error', {'message': 'Invalid game ID format'})
         return
 
@@ -676,7 +707,7 @@ def handle_make_move(data):
         import traceback
         print(f"[make_move] EXCEPTION: {e}", flush=True)
         traceback.print_exc()
-        emit('error', {'message': f'Server error: {str(e)}'})
+        emit('error', {'message': 'An internal server error occurred.'})
 
 
 def _start_next_round(game_id):
@@ -724,6 +755,11 @@ def handle_timeout(data):
     """Player ran out of time — make a random move for them."""
     game_id = data.get('game_id')
     player_id = request.sid
+
+    # Must be authenticated
+    if player_id not in active_sessions:
+        print(f"[SECURITY] unauthenticated timeout from {player_id}", flush=True)
+        return
 
     print(f"[timeout] player={player_id} game={game_id}", flush=True)
 
@@ -807,6 +843,11 @@ def handle_rematch(data):
 
     game = games[game_id]
 
+    # Verify sender is actually in this game
+    if player_id not in (game.x_player, game.o_player):
+        print(f"[SECURITY] rematch_request rejected: {player_id} not in game {game_id}", flush=True)
+        return
+
     if game_id not in rematch_requests:
         rematch_requests[game_id] = set()
 
@@ -861,6 +902,13 @@ def handle_leave_game(data):
     if not game_id:
         return
 
+    # Verify sender is actually a player in this game before doing anything destructive
+    if game_id in games:
+        game = games[game_id]
+        if player_id not in (game.x_player, game.o_player):
+            print(f"[SECURITY] leave_game rejected: {player_id} not in game {game_id}", flush=True)
+            return
+
     # Cancel any pending rematch request
     if game_id in rematch_requests:
         rematch_requests[game_id].discard(player_id)
@@ -886,21 +934,22 @@ def handle_leave_game(data):
 def handle_chat(data):
     game_id = data.get('game_id')
     message = data.get('message', '').strip()
-    sender = data.get('sender', 'Anonymous')
     player_id = request.sid
 
     # SECURITY: Validate inputs
-    if not isinstance(message, str) or not isinstance(sender, str):
+    if not isinstance(message, str):
         return
 
+    # SECURITY: Use server-side username — never trust client-supplied sender
+    sender = active_sessions.get(player_id, 'Anonymous')
+
     # SECURITY: Length limits to prevent spam
-    if not message or len(message) > 200 or len(sender) > 50:
+    if not message or len(message) > 200:
         return
 
     # SECURITY: Basic XSS prevention - remove HTML tags
     import re
     message = re.sub(r'<[^>]*>', '', message)
-    sender = re.sub(r'<[^>]*>', '', sender)
 
     if game_id not in games:
         return
@@ -915,6 +964,8 @@ def handle_chat(data):
 
 @socketio.on('get_leaderboard')
 def handle_leaderboard():
+    if request.sid not in active_sessions:
+        return
     emit('leaderboard_data', {'leaderboard': get_leaderboard()})
 
 
@@ -934,6 +985,9 @@ def handle_disconnect():
 
     player_usernames.pop(player_id, None)
     active_sessions.pop(player_id, None)
+
+    last_move_time.pop(player_id, None)   # prevent memory leak
+    login_attempts.pop(player_id, None)    # prevent memory leak
 
     for game_id, game in list(games.items()):
         if player_id in (game.x_player, game.o_player):
