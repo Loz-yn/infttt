@@ -18,6 +18,34 @@ rematch_requests = {}  # game_id -> set of player sids who requested rematch
 
 # ── DATABASE ──────────────────────────────────────────────────────────────────
 
+def get_rank_name(mmr):
+    """Convert MMR to rank name"""
+    ranks = [
+        ('Onyx 1', 3000),
+        ('Onyx 2', 2850),
+        ('Onyx 3', 2700),
+        ('Obsidian 1', 2550),
+        ('Obsidian 2', 2400),
+        ('Obsidian 3', 2250),
+        ('Ruby 1', 2100),
+        ('Ruby 2', 2000),
+        ('Ruby 3', 1900),
+        ('Gold 1', 1800),
+        ('Gold 2', 1700),
+        ('Gold 3', 1600),
+        ('Silver 1', 1500),
+        ('Silver 2', 1400),
+        ('Silver 3', 1300),
+        ('Bronze 1', 1200),
+        ('Bronze 2', 1100),
+        ('Bronze 3', 0)
+    ]
+    for name, threshold in ranks:
+        if mmr >= threshold:
+            return name
+    return 'Bronze 3'
+
+
 def get_conn():
     url = os.environ['DATABASE_URL']
     # Railway uses postgres:// but psycopg2 needs postgresql://
