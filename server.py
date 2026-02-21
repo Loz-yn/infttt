@@ -9,8 +9,12 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or (_ for _ in ()).throw(
     RuntimeError("SECRET_KEY environment variable is not set. Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\"")
 )
-_cors_origins = os.environ.get('ALLOWED_ORIGINS', '').split(',') or []
-socketio = SocketIO(app, cors_allowed_origins=_cors_origins if _cors_origins else [], async_mode='gevent', manage_session=False)
+_raw_origins = os.environ.get('ALLOWED_ORIGINS', '')
+_cors_origins = [o.strip() for o in _raw_origins.split(',') if o.strip()]
+# Fall back to '*' only if no origins configured, so local dev still works.
+# In production, always set ALLOWED_ORIGINS to your domain.
+_cors_setting = _cors_origins if _cors_origins else '*'
+socketio = SocketIO(app, cors_allowed_origins=_cors_setting, async_mode='gevent', manage_session=False)
 
 games = {}
 waiting_room = []
@@ -241,7 +245,6 @@ def get_leaderboard():
     with get_conn() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("SELECT username, wins, losses, rank FROM users ORDER BY rank DESC, wins DESC LIMIT 100")
-            return list(cur.fetchall())
             return [dict(row) for row in cur.fetchall()]
 
 
@@ -377,6 +380,12 @@ def handle_login(data):
     password = data.get('password', '').strip()
     if not username or not password:
         emit('login_failed', {'message': 'Username and password required!'})
+        return
+
+    # SECURITY: Validate username format — alphanumeric + underscores/hyphens, 3–20 chars
+    import re as _re
+    if not _re.match(r'^[a-zA-Z0-9_-]{3,20}$', username):
+        emit('login_failed', {'message': 'Username must be 3–20 characters and only contain letters, numbers, underscores, or hyphens.'})
         return
 
     # SECURITY: Rate limit login attempts per username to prevent brute-force
@@ -625,7 +634,7 @@ def handle_make_move(data):
         import traceback
         print(f"[make_move] EXCEPTION: {e}", flush=True)
         traceback.print_exc()
-        emit('error', {'message': f'Server error: {str(e)}'})
+        emit('error', {'message': 'An internal server error occurred. Please try again.'})
 
 
 def _start_next_round(game_id):
