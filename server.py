@@ -244,6 +244,9 @@ def update_user_stats(username, result, opponent_username=None):
                     rank_change = max(rank_change, -k * 0.5)
 
                 rank_change = int(rank_change)
+                # Guarantee minimum change so extreme MMR gaps never result in +0/-0
+                if rank_change == 0:
+                    rank_change = 1 if result == 'win' else -1
 
                 rank_floor = get_rank_floor(user_rank)
                 new_rank = user_rank + rank_change
