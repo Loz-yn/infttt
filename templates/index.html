@@ -993,7 +993,91 @@
             text-transform: uppercase;
         }
         #debugToggle:hover { background: #0f0f20; }
-    </style>
+    
+        /* ── RANK LADDER MODAL ── */
+        #rankModal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.7);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        #rankModal.show { display: flex; }
+
+        .rank-modal-box {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 28px 24px;
+            width: 280px;
+            max-height: 80vh;
+            overflow-y: auto;
+            position: relative;
+        }
+
+        .rank-modal-title {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 22px;
+            letter-spacing: 2px;
+            margin-bottom: 20px;
+            color: var(--text);
+        }
+
+        .rank-ladder {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0;
+        }
+
+        .rank-ladder-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            width: 100%;
+            padding: 8px 10px;
+            border-radius: 8px;
+            transition: background 0.15s;
+        }
+        .rank-ladder-item.current-rank {
+            background: rgba(255,255,255,0.07);
+            outline: 1px solid rgba(255,255,255,0.15);
+        }
+        .rank-ladder-item img {
+            width: 28px;
+            height: 28px;
+            object-fit: contain;
+        }
+        .rank-ladder-name {
+            font-size: 13px;
+            flex: 1;
+        }
+        .rank-ladder-mmr {
+            font-size: 11px;
+            color: var(--muted);
+        }
+        .rank-ladder-connector {
+            width: 2px;
+            height: 14px;
+            background: var(--border);
+            margin-left: 23px; /* aligns with center of icon */
+        }
+
+        .rank-modal-close {
+            position: absolute;
+            top: 14px;
+            right: 16px;
+            background: none;
+            border: none;
+            color: var(--muted);
+            font-size: 18px;
+            cursor: pointer;
+            line-height: 1;
+        }
+        .rank-modal-close:hover { color: var(--text); }
+        </style>
 </head>
 <body>
 <div class="wrapper">
@@ -1030,7 +1114,7 @@
         <!-- User bar -->
         <div class="user-bar">
             <div class="user-left">
-                <img id="userRankIcon" class="rank-icon" src="/static/ranks/bronze3.png" alt="Rank" title="Bronze 3">
+                <img id="userRankIcon" class="rank-icon" src="/static/ranks/bronze3.png" alt="Rank" title="Click to view all ranks" style="cursor:pointer;" onclick="toggleRankModal()">
                 <div class="user-avatar" id="avatarLetter">?</div>
                 <div style="flex:1;">
                     <div class="user-name-display" id="displayUsername"></div>
@@ -1042,14 +1126,8 @@
                     </div>
                     <!-- MMR progress bar -->
                     <div id="mmrBarWrap" style="margin-top:6px;max-width:280px;">
-                        <div style="position:relative;height:5px;background:var(--border);border-radius:99px;overflow:visible;">
-                            <div id="mmrBarFill" style="height:100%;border-radius:99px;background:var(--accent);transition:width 0.5s ease;"></div>
-                            <!-- Floor marker -->
-                            <div id="mmrFloorMarker" title="Tier floor" style="position:absolute;top:-3px;width:2px;height:11px;background:#ff4d6d;border-radius:1px;display:none;"></div>
-                        </div>
-                        <div style="display:flex;justify-content:space-between;margin-top:3px;font-size:10px;color:var(--muted);">
-                            <span id="mmrFloorLabel" style="color:#ff4d6d55;"></span>
-                            <span id="mmrNextLabel"></span>
+                        <div style="position:relative;height:5px;background:var(--border);border-radius:99px;overflow:hidden;">
+                            <div id="mmrBarFill" style="height:100%;border-radius:99px;background:#ffffff;transition:width 0.5s ease;"></div>
                         </div>
                     </div>
                 </div>
@@ -1190,12 +1268,90 @@
 
 </div>
 
-<script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+<script src="https://cdn.socket.io/4.5.4/socket.io.min.js">
+    // ═══════════════════════════════════════════════════════
+    //  RANK LADDER MODAL
+    // ═══════════════════════════════════════════════════════
+    const ALL_RANKS = [
+        { name: 'Apex',       mmr: 4500, icon: 'apex.png' },
+        { name: 'Onyx 1',     mmr: 3000, icon: 'onyx1.png' },
+        { name: 'Onyx 2',     mmr: 2850, icon: 'onyx2.png' },
+        { name: 'Onyx 3',     mmr: 2700, icon: 'onyx3.png' },
+        { name: 'Obsidian 1', mmr: 2550, icon: 'obsidian1.png' },
+        { name: 'Obsidian 2', mmr: 2400, icon: 'obsidian2.png' },
+        { name: 'Obsidian 3', mmr: 2250, icon: 'obsidian3.png' },
+        { name: 'Ruby 1',     mmr: 2100, icon: 'ruby1.png' },
+        { name: 'Ruby 2',     mmr: 2000, icon: 'ruby2.png' },
+        { name: 'Ruby 3',     mmr: 1900, icon: 'ruby3.png' },
+        { name: 'Gold 1',     mmr: 1800, icon: 'gold1.png' },
+        { name: 'Gold 2',     mmr: 1700, icon: 'gold2.png' },
+        { name: 'Gold 3',     mmr: 1600, icon: 'gold3.png' },
+        { name: 'Silver 1',   mmr: 1500, icon: 'silver1.png' },
+        { name: 'Silver 2',   mmr: 1400, icon: 'silver2.png' },
+        { name: 'Silver 3',   mmr: 1300, icon: 'silver3.png' },
+        { name: 'Bronze 1',   mmr: 1200, icon: 'bronze1.png' },
+        { name: 'Bronze 2',   mmr: 1100, icon: 'bronze2.png' },
+        { name: 'Bronze 3',   mmr: 0,    icon: 'bronze3.png' },
+    ];
+
+    function toggleRankModal() {
+        const modal = document.getElementById('rankModal');
+        const isOpen = modal.classList.toggle('show');
+        if (isOpen) buildRankLadder();
+    }
+
+    function buildRankLadder() {
+        const container = document.getElementById('rankLadder');
+        container.innerHTML = '';
+        const currentRank = getRankName(userStats ? userStats.rank : 0);
+
+        ALL_RANKS.forEach((rank, i) => {
+            // Connector line between ranks (not before the first)
+            if (i > 0) {
+                const connector = document.createElement('div');
+                connector.className = 'rank-ladder-connector';
+                container.appendChild(connector);
+            }
+
+            const item = document.createElement('div');
+            item.className = 'rank-ladder-item' + (rank.name === currentRank ? ' current-rank' : '');
+
+            const img = document.createElement('img');
+            img.src = `/static/ranks/${rank.icon}`;
+            img.alt = rank.name;
+
+            const nameEl = document.createElement('span');
+            nameEl.className = 'rank-ladder-name';
+            nameEl.textContent = rank.name;
+            if (rank.name === currentRank) nameEl.style.color = 'var(--accent)';
+
+            const mmrEl = document.createElement('span');
+            mmrEl.className = 'rank-ladder-mmr';
+            mmrEl.textContent = rank.mmr === 0 ? '0+' : `${rank.mmr}+`;
+
+            item.appendChild(img);
+            item.appendChild(nameEl);
+            item.appendChild(mmrEl);
+            container.appendChild(item);
+
+            // Auto-scroll current rank into view
+            if (rank.name === currentRank) {
+                setTimeout(() => item.scrollIntoView({ block: 'center', behavior: 'smooth' }), 50);
+            }
+        });
+    }
+
+    // Close modal when clicking backdrop
+    document.getElementById('rankModal').addEventListener('click', e => {
+        if (e.target === document.getElementById('rankModal')) toggleRankModal();
+    });
+
+</script>
 <script>
     // ═══════════════════════════════════════════════════════
     //  DEBUG CONSOLE
     // ═══════════════════════════════════════════════════════
-    const VERSION = 'v2.00/Alpha';
+    const VERSION = 'v2.05/Alpha';
     document.querySelector('.version-tag').textContent = VERSION;
 
     // ═══════════════════════════════════════════════════════
@@ -1488,30 +1644,6 @@
         const fill = document.getElementById('mmrBarFill');
         fill.style.width      = pct + '%';
         fill.style.background = '#ffffff';
-
-        // Floor marker: show as a vertical line at the floor position in the bar
-        const marker      = document.getElementById('mmrFloorMarker');
-        const floorLabel  = document.getElementById('mmrFloorLabel');
-        const nextLabel   = document.getElementById('mmrNextLabel');
-
-        if (floor > 0 && !isApex) {
-            // Floor marker sits at the leftmost edge of the bar (0%), since the
-            // bar range starts at floor. Visually pin it so player sees the boundary.
-            marker.style.display = 'block';
-            marker.style.left    = '0%';
-            marker.title         = `Tier floor: ${floor} MMR — you can't drop below this`;
-            floorLabel.textContent = `⬤ ${floor} floor`;
-            nextLabel.textContent  = `${next} →`;
-        } else if (isApex) {
-            marker.style.display   = 'none';
-            floorLabel.textContent = '';
-            nextLabel.textContent  = 'Apex — Max Rank';
-        } else {
-            // Bronze 3 — no floor
-            marker.style.display   = 'none';
-            floorLabel.textContent = '';
-            nextLabel.textContent  = `${next} →`;
-        }
     }
 
     // ═══════════════════════════════════════════════════════
@@ -2097,6 +2229,16 @@
         if (e.target === document.getElementById('lbModal')) closeLeaderboard();
     });
 </script>
+
+
+    <!-- Rank Ladder Modal -->
+    <div id="rankModal">
+        <div class="rank-modal-box">
+            <button class="rank-modal-close" onclick="toggleRankModal()">✕</button>
+            <div class="rank-modal-title">RANK LADDER</div>
+            <div class="rank-ladder" id="rankLadder"></div>
+        </div>
+    </div>
 
 </body>
 </html>
