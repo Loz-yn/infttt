@@ -21,6 +21,7 @@ rematch_requests = {}  # game_id -> set of player sids who requested rematch
 def get_rank_name(mmr):
     """Convert MMR to rank name"""
     ranks = [
+        ('Apex', 4500),
         ('Onyx 1', 3000),
         ('Onyx 2', 2850),
         ('Onyx 3', 2700),
