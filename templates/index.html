@@ -1032,12 +1032,25 @@
             <div class="user-left">
                 <img id="userRankIcon" class="rank-icon" src="/static/ranks/bronze3.png" alt="Rank" title="Bronze 3">
                 <div class="user-avatar" id="avatarLetter">?</div>
-                <div>
+                <div style="flex:1;">
                     <div class="user-name-display" id="displayUsername"></div>
                     <div class="user-stats-bar">
                         <span class="stat-w">W: <span id="userWins">0</span></span> ·
                         <span class="stat-l">L: <span id="userLosses">0</span></span> ·
-                        <span class="stat-r"><span id="userRank" class="rank-badge">Bronze 3</span></span>
+                        <span class="stat-r"><span id="userRank" class="rank-badge">Bronze 3</span></span> ·
+                        <span id="userMmr" style="color:var(--muted);font-size:11px;">1000 MMR</span>
+                    </div>
+                    <!-- MMR progress bar -->
+                    <div id="mmrBarWrap" style="margin-top:6px;max-width:280px;">
+                        <div style="position:relative;height:5px;background:var(--border);border-radius:99px;overflow:visible;">
+                            <div id="mmrBarFill" style="height:100%;border-radius:99px;background:var(--accent);transition:width 0.5s ease;"></div>
+                            <!-- Floor marker -->
+                            <div id="mmrFloorMarker" title="Tier floor" style="position:absolute;top:-3px;width:2px;height:11px;background:#ff4d6d;border-radius:1px;display:none;"></div>
+                        </div>
+                        <div style="display:flex;justify-content:space-between;margin-top:3px;font-size:10px;color:var(--muted);">
+                            <span id="mmrFloorLabel" style="color:#ff4d6d55;"></span>
+                            <span id="mmrNextLabel"></span>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1227,13 +1240,33 @@
     }
 
     function getRankColor(mmr) {
-        if (mmr >= 4500) return '#8d062d'; // Apex - idk
-        if (mmr >= 3000) return '#1a1a2e'; // Onyx - dark
-        if (mmr >= 2250) return '#2d1b3d'; // Obsidian - purple-black
-        if (mmr >= 1900) return '#8b1538'; // Ruby - deep red
-        if (mmr >= 1600) return '#d4af37'; // Gold - gold
-        if (mmr >= 1300) return '#c0c0c0'; // Silver - silver
-        return '#cd7f32'; // Bronze - bronze
+        if (mmr >= 4500) return '#8d062d'; // Apex
+        if (mmr >= 3000) return '#1a1a2e'; // Onyx
+        if (mmr >= 2250) return '#2d1b3d'; // Obsidian
+        if (mmr >= 1900) return '#8b1538'; // Ruby
+        if (mmr >= 1600) return '#d4af37'; // Gold
+        if (mmr >= 1300) return '#c0c0c0'; // Silver
+        return '#cd7f32'; // Bronze
+    }
+
+    // Tier floor: the minimum MMR a player can fall to once they reach a tier.
+    // Matches the server-side get_rank_floor() logic exactly.
+    function getRankFloor(mmr) {
+        if (mmr >= 4500) return 4500; // Apex
+        if (mmr >= 2700) return 2700; // Onyx tier (Onyx 3 entry)
+        if (mmr >= 2250) return 2250; // Obsidian tier
+        if (mmr >= 1900) return 1900; // Ruby tier
+        if (mmr >= 1600) return 1600; // Gold tier
+        if (mmr >= 1300) return 1300; // Silver tier
+        if (mmr >= 1100) return 1100; // Bronze 2+ — floor at 1100
+        return 0;                      // Bronze 3 — no floor
+    }
+
+    // Next rank threshold above current MMR (for progress bar ceiling)
+    function getNextRankThreshold(mmr) {
+        const thresholds = [1100,1200,1300,1400,1500,1600,1700,1800,1900,2000,2100,2250,2400,2550,2700,2850,3000,4500];
+        for (const t of thresholds) { if (mmr < t) return t; }
+        return mmr; // Already at Apex ceiling
     }
 
     function toggleDebug() {
@@ -1374,6 +1407,34 @@
         alert(data.message);
     });
 
+    // Kicked because this account was logged in from another tab/device
+    socket.on('force_logout', data => {
+        dbg('force_logout — session taken over by another tab', 'err');
+
+        // Clear stored credentials so page doesn't auto-login in a loop
+        localStorage.removeItem('tttUser');
+        localStorage.removeItem('tttPass');
+
+        // Stop any active game timer
+        stopTimer();
+
+        // Show a full-screen overlay (non-blocking, so the new tab isn't paused)
+        const banner = document.createElement('div');
+        banner.style.cssText = [
+            'position:fixed', 'inset:0', 'z-index:99999',
+            'background:rgba(0,0,0,0.9)', 'backdrop-filter:blur(8px)',
+            'display:flex', 'flex-direction:column',
+            'align-items:center', 'justify-content:center', 'gap:16px',
+            "font-family:'DM Mono',monospace", 'color:#e8e8f0'
+        ].join(';') + ';';
+        const msg = data.message || 'You were logged in from another tab or device.';
+        banner.innerHTML =
+            '<div style="font-family:Bebas Neue,sans-serif;font-size:40px;letter-spacing:3px;color:#ff4d6d;">Session Ended</div>' +
+            '<div style="font-size:14px;color:#5a5a7a;max-width:320px;text-align:center;">' + msg + '</div>' +
+            '<button onclick="location.reload()" style="margin-top:8px;padding:12px 32px;background:#f0c060;border:none;border-radius:8px;font-family:Bebas Neue,sans-serif;font-size:20px;letter-spacing:2px;color:#0a0a0f;cursor:pointer;">Back to Login</button>';
+        document.body.appendChild(banner);
+    });
+
     function logout() {
         if (!confirm('Logout?')) return;
         localStorage.removeItem('tttUser');
@@ -1391,23 +1452,66 @@
     }
 
     function updateStatsDisplay() {
+        const mmr = userStats.rank;
         document.getElementById('userWins').textContent   = userStats.wins;
         document.getElementById('userLosses').textContent = userStats.losses;
-        
+
         // Update rank badge
-        const rankInfo = getRankInfo(userStats.rank);
-        const rankEl = document.getElementById('userRank');
-        const rankColor = getRankColor(userStats.rank);
-        rankEl.textContent = rankInfo.name;
+        const rankInfo  = getRankInfo(mmr);
+        const rankColor = getRankColor(mmr);
+        const rankEl    = document.getElementById('userRank');
+        rankEl.textContent       = rankInfo.name;
         rankEl.style.backgroundColor = rankColor;
-        rankEl.style.color = '#fff';
-        rankEl.title = `${userStats.rank} MMR`;
-        
+        rankEl.style.color       = '#fff';
+        rankEl.title             = `${mmr} MMR`;
+
         // Update rank icon
         const rankIconEl = document.getElementById('userRankIcon');
-        rankIconEl.src = `/static/ranks/${rankInfo.icon}`;
-        rankIconEl.alt = rankInfo.name;
-        rankIconEl.title = `${rankInfo.name} (${userStats.rank} MMR)`;
+        rankIconEl.src   = `/static/ranks/${rankInfo.icon}`;
+        rankIconEl.alt   = rankInfo.name;
+        rankIconEl.title = `${rankInfo.name} (${mmr} MMR)`;
+
+        // Update MMR label
+        document.getElementById('userMmr').textContent = `${mmr} MMR`;
+
+        // ── MMR progress bar with tier floor indicator ──
+        const floor = getRankFloor(mmr);
+        const next  = getNextRankThreshold(mmr);
+        const isApex = mmr >= 4500;
+
+        // Progress within the current segment (floor → next threshold)
+        const segLen  = isApex ? 1 : (next - floor);
+        const segPos  = isApex ? 1 : Math.max(0, mmr - floor);
+        const pct     = isApex ? 100 : Math.min(100, Math.round((segPos / segLen) * 100));
+
+        // Fill bar
+        const fill = document.getElementById('mmrBarFill');
+        fill.style.width      = pct + '%';
+        fill.style.background = rankColor;
+
+        // Floor marker: show as a vertical line at the floor position in the bar
+        const marker      = document.getElementById('mmrFloorMarker');
+        const floorLabel  = document.getElementById('mmrFloorLabel');
+        const nextLabel   = document.getElementById('mmrNextLabel');
+
+        if (floor > 0 && !isApex) {
+            // Floor marker sits at the leftmost edge of the bar (0%), since the
+            // bar range starts at floor. Visually pin it so player sees the boundary.
+            marker.style.display = 'block';
+            marker.style.left    = '0%';
+            marker.title         = `Tier floor: ${floor} MMR — you can't drop below this`;
+            floorLabel.textContent = `⬤ ${floor} floor`;
+            nextLabel.textContent  = `${next} →`;
+        } else if (isApex) {
+            marker.style.display   = 'none';
+            floorLabel.textContent = '';
+            nextLabel.textContent  = 'Apex — Max Rank';
+        } else {
+            // Bronze 3 — no floor
+            marker.style.display   = 'none';
+            floorLabel.textContent = '';
+            nextLabel.textContent  = `${next} →`;
+        }
     }
 
     // ═══════════════════════════════════════════════════════

@@ -12,11 +12,46 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode='gevent', manage_s
 games = {}
 waiting_room = []
 player_usernames = {}
-active_sessions = {}
-rematch_requests = {}  # game_id -> set of player sids who requested rematch
+active_sessions = {}       # sid -> username
+username_to_sid = {}       # username -> sid (enforces single active session per user)
+rematch_requests = {}      # game_id -> set of player sids who requested rematch
 
 
 # ── DATABASE ──────────────────────────────────────────────────────────────────
+
+# Rank floor: the minimum MMR a player can fall to once they've reached a tier.
+# Floors sit at the entry threshold of each tier's lowest sub-rank.
+RANK_FLOORS = [
+    (4500, 4500),   # Apex floor (can't fall out of Apex)
+    (3000, 3000),   # Onyx floor (Bronze 1 entry → Onyx 3 @ 2700... floor at Onyx entry 3000? No — floor at Onyx 3)
+    (2700, 2700),   # Onyx 3 is the entry to Onyx tier
+    (2250, 2250),   # Obsidian 3 is the entry to Obsidian tier
+    (1900, 1900),   # Ruby 3 is the entry to Ruby tier
+    (1600, 1600),   # Gold 3 is the entry to Gold tier
+    (1300, 1300),   # Silver 3 is the entry to Silver tier
+    (1100, 1100),   # Bronze 2 is the entry to Bronze tier (above starting Bronze 3)
+    (0, 0),         # Bronze 3 — absolute floor
+]
+
+
+def get_rank_floor(mmr):
+    """Return the MMR floor for the current tier at the given MMR."""
+    # Tiers and their floor (entry MMR of the lowest sub-rank in that tier)
+    tier_floors = [
+        (4500, 4500),  # Apex
+        (2700, 2700),  # Onyx  (Onyx 3 @ 2700)
+        (2250, 2250),  # Obsidian (Obsidian 3 @ 2250)
+        (1900, 1900),  # Ruby (Ruby 3 @ 1900)
+        (1600, 1600),  # Gold (Gold 3 @ 1600)
+        (1300, 1300),  # Silver (Silver 3 @ 1300)
+        (1100, 1100),  # Bronze upper (Bronze 2 @ 1100)
+        (0, 0),        # Bronze 3 — no floor
+    ]
+    for threshold, floor in tier_floors:
+        if mmr >= threshold:
+            return floor
+    return 0
+
 
 def get_rank_name(mmr):
     """Convert MMR to rank name"""
@@ -120,38 +155,77 @@ def authenticate_user(username, password):
     return None
 
 
+def get_k_factor(rank, total_games):
+    """
+    Dynamic K-factor based on rank and experience.
+    - New players (< 10 games): K=40 so they settle quickly
+    - Low rank (< 1200): K=24 — meaningful but not punishing
+    - Mid rank (1200–2100): K=20 — standard competitive
+    - High rank (2100–2700): K=16 — slower movement, harder to climb/fall
+    - Elite rank (>= 2700): K=12 — very stable at the top
+    """
+    if total_games < 10:
+        return 40
+    if rank >= 2700:
+        return 12
+    if rank >= 2100:
+        return 16
+    if rank >= 1200:
+        return 20
+    return 24
+
+
 def update_user_stats(username, result, opponent_username=None):
     """
-    Update user stats with ELO-style ranking system
+    Update user stats with improved ELO-style ranking system.
+    - Dynamic K-factor (lower at high ranks, higher for new players)
+    - Upset bonus: beating a much stronger opponent gives extra points
+    - Floor protection: you cannot drop below rank 0
     result: 'win' or 'loss'
     """
-    K_FACTOR = 32  # How much rank changes per game
-
     with get_conn() as conn:
         with conn.cursor() as cur:
             # Update wins/losses
             if result == 'win':
                 cur.execute("UPDATE users SET wins = wins + 1 WHERE username = %s", (username,))
-            else:  # loss
+            else:
                 cur.execute("UPDATE users SET losses = losses + 1 WHERE username = %s", (username,))
 
             # Calculate rank change if we have opponent info
             if opponent_username:
-                cur.execute("SELECT rank FROM users WHERE username = %s", (username,))
-                user_rank = cur.fetchone()[0]
+                cur.execute("SELECT rank, wins, losses FROM users WHERE username = %s", (username,))
+                row = cur.fetchone()
+                user_rank, user_wins, user_losses = row
+                total_games = user_wins + user_losses
 
                 cur.execute("SELECT rank FROM users WHERE username = %s", (opponent_username,))
                 opp_rank = cur.fetchone()[0]
 
-                # ELO formula
-                expected_score = 1 / (1 + 10 ** ((opp_rank - user_rank) / 400))
-                actual_score = 1 if result == 'win' else 0
-                rank_change = int(K_FACTOR * (actual_score - expected_score))
+                # Dynamic K-factor
+                k = get_k_factor(user_rank, total_games)
 
-                # Update rank (minimum 0)
+                # Standard ELO expected score
+                expected_score = 1 / (1 + 10 ** ((opp_rank - user_rank) / 400))
+                actual_score = 1.0 if result == 'win' else 0.0
+
+                rank_change = k * (actual_score - expected_score)
+
+                # Upset bonus: winning against a player 300+ MMR higher gives +20% extra
+                if result == 'win' and opp_rank - user_rank >= 300:
+                    rank_change *= 1.2
+                # Upset protection: losing against a player 300+ MMR lower caps the loss
+                elif result == 'loss' and user_rank - opp_rank >= 300:
+                    rank_change = max(rank_change, -k * 0.5)
+
+                rank_change = int(rank_change)
+
+                # Apply rank floor: can't fall below the entry MMR of the current tier
+                rank_floor = get_rank_floor(user_rank)
+
+                # Update rank, enforcing the tier floor
                 cur.execute(
-                    "UPDATE users SET rank = GREATEST(0, rank + %s) WHERE username = %s",
-                    (rank_change, username)
+                    "UPDATE users SET rank = GREATEST(%s, rank + %s) WHERE username = %s",
+                    (rank_floor, rank_change, username)
                 )
 
         conn.commit()
@@ -257,6 +331,36 @@ def index():
     return render_template('index.html')
 
 
+def _kick_existing_session(username):
+    """Disconnect any existing session for this username and clean up all state."""
+    old_sid = username_to_sid.get(username)
+    if not old_sid:
+        return
+
+    print(f"[login] kicking old session {old_sid} for {username}", flush=True)
+
+    # Remove from waiting room
+    if old_sid in waiting_room:
+        waiting_room.remove(old_sid)
+
+    # If mid-game, forfeit and notify opponent
+    for game_id, game in list(games.items()):
+        if old_sid in (game.x_player, game.o_player):
+            opp = game.get_opponent(old_sid)
+            socketio.emit('opponent_disconnected', {}, room=opp, namespace='/')
+            if game_id in rematch_requests:
+                del rematch_requests[game_id]
+            del games[game_id]
+            break
+
+    # Clean up session maps
+    active_sessions.pop(old_sid, None)
+    player_usernames.pop(old_sid, None)
+
+    # Tell the old tab it's been logged out
+    socketio.emit('force_logout', {'message': 'You were logged in from another tab or device.'}, room=old_sid, namespace='/')
+
+
 @socketio.on('login')
 def handle_login(data):
     username = data.get('username', '').strip()
@@ -266,7 +370,10 @@ def handle_login(data):
         return
     user_data = authenticate_user(username, password)
     if user_data:
+        # Kick any existing session for this user before creating a new one
+        _kick_existing_session(username)
         active_sessions[request.sid] = username
+        username_to_sid[username] = request.sid
         emit('login_success', {'username': username, 'stats': {'wins': user_data['wins'], 'losses': user_data['losses'],
                                                                'rank': user_data['rank']}})
     else:
@@ -275,7 +382,9 @@ def handle_login(data):
             emit('login_failed', {'message': 'Incorrect password!'})
         else:
             if create_user(username, password):
+                _kick_existing_session(username)
                 active_sessions[request.sid] = username
+                username_to_sid[username] = request.sid
                 emit('login_success', {'username': username, 'stats': {'wins': 0, 'losses': 0, 'rank': 1000}})
             else:
                 emit('login_failed', {'message': 'Failed to create account!'})
@@ -302,11 +411,16 @@ def handle_find_game(data):
         emit('waiting', {'message': 'Still searching for opponent...'})
         return
 
-        # Find the first valid opponent that is not this same socket and is still active.
+        # Find the first valid opponent that is not this same socket/username and is still active.
     opp_id = None
     while waiting_room:
         candidate = waiting_room.pop(0)
         if candidate == player_id:
+            continue
+        # Prevent same user playing against themselves from another tab
+        if active_sessions.get(candidate) == username:
+            # Stale entry from a previous session — discard it
+            player_usernames.pop(candidate, None)
             continue
         if any(candidate in (g.x_player, g.o_player) for g in games.values()):
             continue
@@ -731,6 +845,12 @@ def handle_disconnect():
     player_id = request.sid
     if player_id in waiting_room:
         waiting_room.remove(player_id)
+
+    # Clean up username -> sid mapping only if this sid is still the active one
+    username = active_sessions.get(player_id)
+    if username and username_to_sid.get(username) == player_id:
+        del username_to_sid[username]
+
     player_usernames.pop(player_id, None)
     active_sessions.pop(player_id, None)
 
