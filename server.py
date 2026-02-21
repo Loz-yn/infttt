@@ -6,8 +6,11 @@ import psycopg2
 import psycopg2.extras
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'ttt_secret_key'
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='gevent', manage_session=False)
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or (_ for _ in ()).throw(
+    RuntimeError("SECRET_KEY environment variable is not set. Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\"")
+)
+_cors_origins = os.environ.get('ALLOWED_ORIGINS', '').split(',') or []
+socketio = SocketIO(app, cors_allowed_origins=_cors_origins if _cors_origins else [], async_mode='gevent', manage_session=False)
 
 games = {}
 waiting_room = []
@@ -263,6 +266,8 @@ class TTTGame:
         # SECURITY: Server-side timer for each turn
         import time
         self.turn_start_time = time.time()
+        # Unique token per turn — used to detect if a move was made before timeout fires
+        self.turn_token = str(uuid.uuid4())
 
     def make_move(self, index, mark):
         if self.turn != mark or self.board[index] is not None:
@@ -326,6 +331,11 @@ class TTTGame:
 
 # ── AUTH HANDLERS ─────────────────────────────────────────────────────────────
 
+# SECURITY: Login rate limiting — track failed attempts per username
+_login_attempts = {}       # username -> [timestamps]
+LOGIN_MAX_ATTEMPTS = 10    # max attempts
+LOGIN_WINDOW = 60          # within this many seconds
+
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -368,8 +378,20 @@ def handle_login(data):
     if not username or not password:
         emit('login_failed', {'message': 'Username and password required!'})
         return
+
+    # SECURITY: Rate limit login attempts per username to prevent brute-force
+    now = time.time()
+    attempts = _login_attempts.get(username, [])
+    attempts = [t for t in attempts if now - t < LOGIN_WINDOW]  # prune old entries
+    if len(attempts) >= LOGIN_MAX_ATTEMPTS:
+        emit('login_failed', {'message': 'Too many attempts. Please wait and try again.'})
+        return
+    _login_attempts[username] = attempts
+
     user_data = authenticate_user(username, password)
     if user_data:
+        # Successful login — clear rate limit record
+        _login_attempts.pop(username, None)
         # Kick any existing session for this user before creating a new one
         _kick_existing_session(username)
         active_sessions[request.sid] = username
@@ -379,7 +401,11 @@ def handle_login(data):
     else:
         user = get_user(username)
         if user:
-            emit('login_failed', {'message': 'Incorrect password!'})
+            # SECURITY: Record failed attempt only on existing accounts (wrong password)
+            attempts.append(now)
+            _login_attempts[username] = attempts
+            # Use a generic message to avoid confirming whether the account exists
+            emit('login_failed', {'message': 'Incorrect username or password.'})
         else:
             if create_user(username, password):
                 _kick_existing_session(username)
@@ -387,7 +413,7 @@ def handle_login(data):
                 username_to_sid[username] = request.sid
                 emit('login_success', {'username': username, 'stats': {'wins': 0, 'losses': 0, 'rank': 1000}})
             else:
-                emit('login_failed', {'message': 'Failed to create account!'})
+                emit('login_failed', {'message': 'Incorrect username or password.'})
 
 
 # ── MATCHMAKING ───────────────────────────────────────────────────────────────
@@ -449,6 +475,8 @@ def handle_find_game(data):
         emit('game_start', {'game_id': game_id, 'mark': 'O', 'first_turn': 'X', 'new_match': True,
                             'opponent_name': opp_username, 'x_player': opp_username, 'o_player': username},
              room=player_id)
+        # Start server-side turn timer — X goes first
+        socketio.start_background_task(schedule_timeout, game_id, game.turn_token)
     else:
         waiting_room.append(player_id)
         emit('waiting', {'message': 'Waiting for opponent...'})
@@ -556,6 +584,10 @@ def handle_make_move(data):
 
         # Reset timer for next turn
         game.turn_start_time = current_time
+        game.turn_token = str(uuid.uuid4())
+        # Start server-side timeout watcher for the next player's turn
+        if not game_over:
+            socketio.start_background_task(schedule_timeout, game_id, game.turn_token)
 
         stats_x = stats_o = None
         if game_over and winner:
@@ -636,27 +668,32 @@ def _start_next_round(game_id):
 
     del games[game_id]
     print(f"[next_round] old game deleted", flush=True)
+    # Start server-side turn timer for the new round
+    socketio.start_background_task(schedule_timeout, new_game_id, new_game.turn_token)
 
 
-@socketio.on('timeout')
-def handle_timeout(data):
-    """Player ran out of time — make a random move for them."""
-    game_id = data.get('game_id')
-    player_id = request.sid
+def schedule_timeout(game_id, turn_token):
+    """Called server-side after 15s to auto-move if the turn hasn't changed."""
+    socketio.sleep(15)
+    if game_id not in games:
+        return
+    game = games[game_id]
+    # Only fire if the turn hasn't advanced (same token means no move was made)
+    if game.turn_token != turn_token:
+        return
+    _execute_timeout(game_id, game.turn)
 
-    print(f"[timeout] player={player_id} game={game_id}", flush=True)
+
+def _execute_timeout(game_id, timed_out_mark):
+    """Make a random move for the player who ran out of time."""
+    print(f"[timeout] auto-move for {timed_out_mark} in game {game_id}", flush=True)
 
     if game_id not in games:
         print(f"[timeout] game not found", flush=True)
         return
 
     game = games[game_id]
-    mark = game.get_mark(player_id)
-
-    # Only the player whose turn it is can time out
-    if game.turn != mark:
-        print(f"[timeout] not this player's turn", flush=True)
-        return
+    mark = timed_out_mark
 
     # Find all empty cells
     empty_cells = [i for i in range(9) if game.board[i] is None]
@@ -768,6 +805,8 @@ def handle_rematch(data):
                                'o_player': game.o_username}, room=game.o_player)
 
         del games[game_id]
+        # Start server-side turn timer for the rematch
+        socketio.start_background_task(schedule_timeout, new_game_id, new_game.turn_token)
 
 
 @socketio.on('leave_game')
@@ -806,21 +845,24 @@ def handle_leave_game(data):
 def handle_chat(data):
     game_id = data.get('game_id')
     message = data.get('message', '').strip()
-    sender = data.get('sender', 'Anonymous')
     player_id = request.sid
 
+    # SECURITY: Always use server-side verified username — never trust client-supplied sender
+    sender = active_sessions.get(player_id)
+    if not sender:
+        return
+
     # SECURITY: Validate inputs
-    if not isinstance(message, str) or not isinstance(sender, str):
+    if not isinstance(message, str):
         return
 
     # SECURITY: Length limits to prevent spam
-    if not message or len(message) > 200 or len(sender) > 50:
+    if not message or len(message) > 200:
         return
 
     # SECURITY: Basic XSS prevention - remove HTML tags
     import re
     message = re.sub(r'<[^>]*>', '', message)
-    sender = re.sub(r'<[^>]*>', '', sender)
 
     if game_id not in games:
         return

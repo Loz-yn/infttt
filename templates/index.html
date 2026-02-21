@@ -1195,7 +1195,7 @@
     // ═══════════════════════════════════════════════════════
     //  DEBUG CONSOLE
     // ═══════════════════════════════════════════════════════
-    const VERSION = 'v1.91/Alpha - New MMR system';
+    const VERSION = 'v1.91/Alpha - Security 2';
     document.querySelector('.version-tag').textContent = VERSION;
 
     // ═══════════════════════════════════════════════════════
@@ -2059,12 +2059,36 @@
             const rankColor = getRankColor(p.rank);
             const tr      = document.createElement('tr');
             if (isMe) tr.classList.add('lb-me-row');
-            tr.innerHTML = `
-                <td class="rank-num ${rankCls}">${position}</td>
-                <td class="${isMe ? 'lb-you' : ''}">${p.username}${isMe ? ' ← you' : ''}</td>
-                <td><span class="rank-badge" style="background-color: ${rankColor}; color: #fff;" title="${p.rank} MMR">${rankName}</span></td>
-                <td>${p.wins}</td>
-                <td>${p.losses}</td>`;
+
+            // SECURITY: Build cells with textContent to prevent XSS from usernames
+            const tdPos = document.createElement('td');
+            tdPos.className = `rank-num ${rankCls}`;
+            tdPos.textContent = position;
+
+            const tdName = document.createElement('td');
+            if (isMe) tdName.className = 'lb-you';
+            tdName.textContent = p.username + (isMe ? ' ← you' : '');
+
+            const tdRank = document.createElement('td');
+            const badge = document.createElement('span');
+            badge.className = 'rank-badge';
+            badge.style.backgroundColor = rankColor;
+            badge.style.color = '#fff';
+            badge.title = `${p.rank} MMR`;
+            badge.textContent = rankName;
+            tdRank.appendChild(badge);
+
+            const tdWins = document.createElement('td');
+            tdWins.textContent = p.wins;
+
+            const tdLosses = document.createElement('td');
+            tdLosses.textContent = p.losses;
+
+            tr.appendChild(tdPos);
+            tr.appendChild(tdName);
+            tr.appendChild(tdRank);
+            tr.appendChild(tdWins);
+            tr.appendChild(tdLosses);
             tbody.appendChild(tr);
         });
     });
