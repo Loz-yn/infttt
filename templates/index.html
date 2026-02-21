@@ -1383,7 +1383,7 @@
     // ═══════════════════════════════════════════════════════
     //  DEBUG CONSOLE
     // ═══════════════════════════════════════════════════════
-    const VERSION = 'v2.10/Alpha - ICONS';
+    const VERSION = 'v2.10/Alpha - Fixes';
     document.querySelector('.version-tag').textContent = VERSION;
 
     // ═══════════════════════════════════════════════════════
@@ -1585,6 +1585,7 @@
     socket.on('login_success', data => {
         username  = data.username;
         userStats = data.stats;
+        myIcon    = data.icon || 'icon1.png';
         localStorage.setItem('tttUser', username);
         localStorage.setItem('tttPass', document.getElementById('password').value);
         dbg(`logged in as ${username}`, 'ok');
@@ -1636,8 +1637,7 @@
         document.getElementById('gameScreen').classList.add('show');
         document.getElementById('headerBtns').style.display = 'flex';
         document.getElementById('displayUsername').textContent = username;
-        document.getElementById('userIconImg').src = `/static/icons/${data.icon || 'icon1.png'}`;
-        myIcon = data.icon || 'icon1.png';
+        document.getElementById('userIconImg').src = `/static/icons/${myIcon}`;
         updateStatsDisplay();
     }
 
