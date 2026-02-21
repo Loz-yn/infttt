@@ -1195,7 +1195,7 @@
     // ═══════════════════════════════════════════════════════
     //  DEBUG CONSOLE
     // ═══════════════════════════════════════════════════════
-    const VERSION = 'v1.91/Alpha - Security 2';
+    const VERSION = 'v2.00/Alpha';
     document.querySelector('.version-tag').textContent = VERSION;
 
     // ═══════════════════════════════════════════════════════
@@ -1249,17 +1249,17 @@
         return '#cd7f32'; // Bronze
     }
 
-    // Tier floor: the minimum MMR a player can fall to once they reach a tier.
-    // Matches the server-side get_rank_floor() logic exactly.
+    // Sub-rank floor: the bottom threshold of the player's current sub-rank.
+    // Used as the left edge of the progress bar so it acts like a per-rank XP bar.
     function getRankFloor(mmr) {
-        if (mmr >= 4500) return 4500; // Apex
-        if (mmr >= 2700) return 2700; // Onyx tier (Onyx 3 entry)
-        if (mmr >= 2250) return 2250; // Obsidian tier
-        if (mmr >= 1900) return 1900; // Ruby tier
-        if (mmr >= 1600) return 1600; // Gold tier
-        if (mmr >= 1300) return 1300; // Silver tier
-        if (mmr >= 1100) return 1100; // Bronze 2+ — floor at 1100
-        return 0;                      // Bronze 3 — no floor
+        // All sub-rank thresholds in ascending order — floor is the highest one <= mmr
+        const thresholds = [0,1100,1200,1300,1400,1500,1600,1700,1800,1900,2000,2100,2250,2400,2550,2700,2850,3000,4500];
+        let floor = 0;
+        for (const t of thresholds) {
+            if (mmr >= t) floor = t;
+            else break;
+        }
+        return floor;
     }
 
     // Next rank threshold above current MMR (for progress bar ceiling)
