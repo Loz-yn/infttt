@@ -129,6 +129,22 @@ def init_db():
                     ) THEN
                         ALTER TABLE users ADD COLUMN rank INTEGER DEFAULT 1000;
                     END IF;
+
+                    -- Add floor_shields: how many loss protections remain at current floor
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns 
+                        WHERE table_name = 'users' AND column_name = 'floor_shields'
+                    ) THEN
+                        ALTER TABLE users ADD COLUMN floor_shields INTEGER DEFAULT 0;
+                    END IF;
+
+                    -- Add floor_shield_mmr: which floor MMR the shields were granted at (-1 = none)
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns 
+                        WHERE table_name = 'users' AND column_name = 'floor_shield_mmr'
+                    ) THEN
+                        ALTER TABLE users ADD COLUMN floor_shield_mmr INTEGER DEFAULT -1;
+                    END IF;
                 END $$;
             ''')
         conn.commit()
@@ -182,12 +198,15 @@ def get_k_factor(rank, total_games):
     return 24
 
 
+FLOOR_SHIELDS_MAX = 3  # Number of loss protections granted when landing on a floor
+
+
 def update_user_stats(username, result, opponent_username=None):
     """
     Update user stats with improved ELO-style ranking system.
     - Dynamic K-factor (lower at high ranks, higher for new players)
     - Upset bonus: beating a much stronger opponent gives extra points
-    - Floor protection: you cannot drop below rank 0
+    - Floor protection: soft demotion shield (3 losses absorbed before demotion)
     result: 'win' or 'loss'
     """
     with get_conn() as conn:
@@ -200,9 +219,9 @@ def update_user_stats(username, result, opponent_username=None):
 
             # Calculate rank change if we have opponent info
             if opponent_username:
-                cur.execute("SELECT rank, wins, losses FROM users WHERE username = %s", (username,))
+                cur.execute("SELECT rank, wins, losses, floor_shields, floor_shield_mmr FROM users WHERE username = %s", (username,))
                 row = cur.fetchone()
-                user_rank, user_wins, user_losses = row
+                user_rank, user_wins, user_losses, floor_shields, floor_shield_mmr = row
                 total_games = user_wins + user_losses
 
                 cur.execute("SELECT rank FROM users WHERE username = %s", (opponent_username,))
@@ -226,14 +245,45 @@ def update_user_stats(username, result, opponent_username=None):
 
                 rank_change = int(rank_change)
 
-                # Apply rank floor: can't fall below the entry MMR of the current tier
                 rank_floor = get_rank_floor(user_rank)
+                new_rank = user_rank + rank_change
 
-                # Update rank, enforcing the tier floor
-                cur.execute(
-                    "UPDATE users SET rank = GREATEST(%s, rank + %s) WHERE username = %s",
-                    (rank_floor, rank_change, username)
-                )
+                if result == 'win':
+                    # On a win: just apply the gain normally, no floor logic needed
+                    cur.execute("UPDATE users SET rank = %s WHERE username = %s", (max(0, new_rank), username))
+
+                    # If the win pushes them above their shielded floor, clear the shield
+                    # (they've climbed out, shields should be fresh next time they hit a floor)
+                    if floor_shield_mmr != -1 and new_rank > floor_shield_mmr:
+                        cur.execute(
+                            "UPDATE users SET floor_shields = 0, floor_shield_mmr = -1 WHERE username = %s",
+                            (username,)
+                        )
+
+                else:
+                    # On a loss: check if they would land at or below the floor
+                    if new_rank <= rank_floor:
+                        if floor_shield_mmr != rank_floor:
+                            # First time landing on this floor — grant fresh shields and pin to floor
+                            cur.execute(
+                                "UPDATE users SET rank = %s, floor_shields = %s, floor_shield_mmr = %s WHERE username = %s",
+                                (rank_floor, FLOOR_SHIELDS_MAX, rank_floor, username)
+                            )
+                        elif floor_shields > 0:
+                            # Already on this floor with shields remaining — consume one shield, stay at floor
+                            cur.execute(
+                                "UPDATE users SET rank = %s, floor_shields = floor_shields - 1 WHERE username = %s",
+                                (rank_floor, username)
+                            )
+                        else:
+                            # Shields exhausted — allow demotion below the floor
+                            cur.execute(
+                                "UPDATE users SET rank = %s, floor_shields = 0, floor_shield_mmr = -1 WHERE username = %s",
+                                (max(0, new_rank), username)
+                            )
+                    else:
+                        # Loss but still above the floor — apply normally
+                        cur.execute("UPDATE users SET rank = %s WHERE username = %s", (max(0, new_rank), username))
 
         conn.commit()
 
