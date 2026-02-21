@@ -193,6 +193,13 @@
 
         .user-left { display: flex; align-items: center; gap: 16px; }
 
+        .rank-icon {
+            width: 42px;
+            height: 42px;
+            object-fit: contain;
+            filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));
+        }
+
         .user-avatar {
             width: 36px;
             height: 36px;
@@ -1023,6 +1030,7 @@
         <!-- User bar -->
         <div class="user-bar">
             <div class="user-left">
+                <img id="userRankIcon" class="rank-icon" src="/static/ranks/bronze3.png" alt="Rank" title="Bronze 3">
                 <div class="user-avatar" id="avatarLetter">?</div>
                 <div>
                     <div class="user-name-display" id="displayUsername"></div>
@@ -1174,43 +1182,47 @@
     // ═══════════════════════════════════════════════════════
     //  DEBUG CONSOLE
     // ═══════════════════════════════════════════════════════
-    const VERSION = 'v1.75/Alpha - Rank System v1.5';
+    const VERSION = 'v1.8/Alpha - Rank Icons';
     document.querySelector('.version-tag').textContent = VERSION;
 
     // ═══════════════════════════════════════════════════════
     //  RANK SYSTEM
     // ═══════════════════════════════════════════════════════
-    function getRankName(mmr) {
+    function getRankInfo(mmr) {
         const ranks = [
-            { name: 'Bronze 3', mmr: 0 },
-            { name: 'Bronze 2', mmr: 1100 },
-            { name: 'Bronze 1', mmr: 1200 },
-            { name: 'Silver 3', mmr: 1300 },
-            { name: 'Silver 2', mmr: 1400 },
-            { name: 'Silver 1', mmr: 1500 },
-            { name: 'Gold 3', mmr: 1600 },
-            { name: 'Gold 2', mmr: 1700 },
-            { name: 'Gold 1', mmr: 1800 },
-            { name: 'Ruby 3', mmr: 1900 },
-            { name: 'Ruby 2', mmr: 2000 },
-            { name: 'Ruby 1', mmr: 2100 },
-            { name: 'Obsidian 3', mmr: 2250 },
-            { name: 'Obsidian 2', mmr: 2400 },
-            { name: 'Obsidian 1', mmr: 2550 },
-            { name: 'Onyx 3', mmr: 2700 },
-            { name: 'Onyx 2', mmr: 2850 },
-            { name: 'Onyx 1', mmr: 3000 }
+            { name: 'Bronze 3', mmr: 0, icon: 'bronze3.png' },
+            { name: 'Bronze 2', mmr: 1100, icon: 'bronze2.png' },
+            { name: 'Bronze 1', mmr: 1200, icon: 'bronze1.png' },
+            { name: 'Silver 3', mmr: 1300, icon: 'silver3.png' },
+            { name: 'Silver 2', mmr: 1400, icon: 'silver2.png' },
+            { name: 'Silver 1', mmr: 1500, icon: 'silver1.png' },
+            { name: 'Gold 3', mmr: 1600, icon: 'gold3.png' },
+            { name: 'Gold 2', mmr: 1700, icon: 'gold2.png' },
+            { name: 'Gold 1', mmr: 1800, icon: 'gold1.png' },
+            { name: 'Ruby 3', mmr: 1900, icon: 'ruby3.png' },
+            { name: 'Ruby 2', mmr: 2000, icon: 'ruby2.png' },
+            { name: 'Ruby 1', mmr: 2100, icon: 'ruby1.png' },
+            { name: 'Obsidian 3', mmr: 2250, icon: 'obsidian3.png' },
+            { name: 'Obsidian 2', mmr: 2400, icon: 'obsidian2.png' },
+            { name: 'Obsidian 1', mmr: 2550, icon: 'obsidian1.png' },
+            { name: 'Onyx 3', mmr: 2700, icon: 'onyx3.png' },
+            { name: 'Onyx 2', mmr: 2850, icon: 'onyx2.png' },
+            { name: 'Onyx 1', mmr: 3000, icon: 'onyx1.png' }
         ];
         
         // Find the highest rank the player qualifies for
-        let rankName = 'Bronze 3';
+        let rankData = { name: 'Bronze 3', icon: 'bronze3.png' };
         for (let i = ranks.length - 1; i >= 0; i--) {
             if (mmr >= ranks[i].mmr) {
-                rankName = ranks[i].name;
+                rankData = ranks[i];
                 break;
             }
         }
-        return rankName;
+        return rankData;
+    }
+    
+    function getRankName(mmr) {
+        return getRankInfo(mmr).name;
     }
 
     function getRankColor(mmr) {
@@ -1379,13 +1391,21 @@
     function updateStatsDisplay() {
         document.getElementById('userWins').textContent   = userStats.wins;
         document.getElementById('userLosses').textContent = userStats.losses;
+        
+        // Update rank badge
+        const rankInfo = getRankInfo(userStats.rank);
         const rankEl = document.getElementById('userRank');
-        const rankName = getRankName(userStats.rank);
         const rankColor = getRankColor(userStats.rank);
-        rankEl.textContent = rankName;
+        rankEl.textContent = rankInfo.name;
         rankEl.style.backgroundColor = rankColor;
         rankEl.style.color = '#fff';
         rankEl.title = `${userStats.rank} MMR`;
+        
+        // Update rank icon
+        const rankIconEl = document.getElementById('userRankIcon');
+        rankIconEl.src = `/static/ranks/${rankInfo.icon}`;
+        rankIconEl.alt = rankInfo.name;
+        rankIconEl.title = `${rankInfo.name} (${userStats.rank} MMR)`;
     }
 
     // ═══════════════════════════════════════════════════════
