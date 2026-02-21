@@ -186,6 +186,9 @@ class TTTGame:
         self.o_username = None
         self.match_score = {'X': 0, 'O': 0}
         self.round = 1
+        # SECURITY: Server-side timer for each turn
+        import time
+        self.turn_start_time = time.time()
 
     def make_move(self, index, mark):
         if self.turn != mark or self.board[index] is not None:
@@ -283,7 +286,11 @@ def handle_login(data):
 @socketio.on('find_game')
 def handle_find_game(data):
     player_id = request.sid
-    username = data.get('username', 'Anonymous')
+    if request.sid not in active_sessions:
+        emit('error', {'message': 'Not authenticated'})
+        return
+
+    username = active_sessions[request.sid]
     player_usernames[player_id] = username
 
     if any(player_id in (g.x_player, g.o_player) for g in games.values()):
@@ -335,13 +342,55 @@ def handle_find_game(data):
 
 # ── MOVES ─────────────────────────────────────────────────────────────────────
 
+# SECURITY: Rate limiting to prevent spam attacks
+import time
+
+last_move_time = {}
+MOVE_COOLDOWN = 0.2  # 200ms minimum between moves per player
+
+
 @socketio.on('make_move')
 def handle_make_move(data):
     game_id = data.get('game_id')
     index = data.get('index')
     player_id = request.sid
 
+    # ═══════════════════════════════════════════════════════════════
+    # SECURITY LAYER 1: Input Validation
+    # ═══════════════════════════════════════════════════════════════
+
+    # Validate data types to prevent injection attacks
+    if not isinstance(game_id, str):
+        emit('error', {'message': 'Invalid game ID format'})
+        return
+
+    if not isinstance(index, int):
+        emit('error', {'message': 'Invalid move format'})
+        return
+
+    # Validate index bounds (0-8 for tic-tac-toe)
+    if index < 0 or index > 8:
+        emit('error', {'message': 'Move out of bounds'})
+        return
+
+    # ═══════════════════════════════════════════════════════════════
+    # SECURITY LAYER 2: Rate Limiting
+    # ═══════════════════════════════════════════════════════════════
+
+    current_time = time.time()
+    if player_id in last_move_time:
+        time_since_last = current_time - last_move_time[player_id]
+        if time_since_last < MOVE_COOLDOWN:
+            print(f"[SECURITY] Rate limit hit: {player_id}", flush=True)
+            emit('error', {'message': 'Too fast! Slow down.'})
+            return
+    last_move_time[player_id] = current_time
+
     print(f"[make_move] game={game_id} index={index} player={player_id}", flush=True)
+
+    # ═══════════════════════════════════════════════════════════════
+    # SECURITY LAYER 3: Game & Player Authentication
+    # ═══════════════════════════════════════════════════════════════
 
     if game_id not in games:
         print(f"[make_move] game not found!", flush=True)
@@ -350,17 +399,49 @@ def handle_make_move(data):
 
     try:
         game = games[game_id]
+
+        # Verify player is actually in this game
+        if player_id not in [game.x_player, game.o_player]:
+            print(f"[SECURITY] Unauthorized player {player_id} tried to move in {game_id}", flush=True)
+            emit('error', {'message': 'You are not in this game'})
+            return
+
         mark = game.get_mark(player_id)
 
-        print(f"[make_move] mark={mark} turn={game.turn} board={game.board}", flush=True)
+        # ═══════════════════════════════════════════════════════════════
+        # SECURITY LAYER 4: Server-Side Timer Check
+        # ═══════════════════════════════════════════════════════════════
+
+        # Check if turn time expired (server-side validation)
+        time_elapsed = current_time - game.turn_start_time
+        if time_elapsed > 16:  # 15s + 1s grace period
+            print(f"[SECURITY] Move rejected - time expired ({time_elapsed:.1f}s)", flush=True)
+            emit('error', {'message': 'Time expired!'})
+            # Force timeout
+            socketio.start_background_task(handle_timeout, {'game_id': game_id})
+            return
+
+        print(f"[make_move] mark={mark} turn={game.turn} board={game.board} time={time_elapsed:.1f}s", flush=True)
+
+        # ═══════════════════════════════════════════════════════════════
+        # SECURITY LAYER 5: Server Validates All Game Logic
+        # ═══════════════════════════════════════════════════════════════
+        # The game.make_move() method validates:
+        # - Is it this player's turn?
+        # - Is the cell empty?
+        # - Is the move legal?
 
         success, removed_index, game_over, winner, win_line = game.make_move(index, mark)
 
         print(f"[make_move] success={success} game_over={game_over} winner={winner} win_line={win_line}", flush=True)
 
         if not success:
+            print(f"[SECURITY] Invalid move rejected", flush=True)
             emit('error', {'message': 'Invalid move!'})
             return
+
+        # Reset timer for next turn
+        game.turn_start_time = current_time
 
         stats_x = stats_o = None
         if game_over and winner:
@@ -612,8 +693,29 @@ def handle_chat(data):
     game_id = data.get('game_id')
     message = data.get('message', '').strip()
     sender = data.get('sender', 'Anonymous')
-    if not message or len(message) > 200 or game_id not in games:
+    player_id = request.sid
+
+    # SECURITY: Validate inputs
+    if not isinstance(message, str) or not isinstance(sender, str):
         return
+
+    # SECURITY: Length limits to prevent spam
+    if not message or len(message) > 200 or len(sender) > 50:
+        return
+
+    # SECURITY: Basic XSS prevention - remove HTML tags
+    import re
+    message = re.sub(r'<[^>]*>', '', message)
+    sender = re.sub(r'<[^>]*>', '', sender)
+
+    if game_id not in games:
+        return
+
+    # SECURITY: Verify player is in this game
+    game = games[game_id]
+    if player_id not in [game.x_player, game.o_player]:
+        return
+
     emit('chat_message', {'sender': sender, 'message': message}, room=game_id, skip_sid=request.sid)
 
 
