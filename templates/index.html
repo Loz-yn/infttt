@@ -1077,6 +1077,92 @@
             line-height: 1;
         }
         .rank-modal-close:hover { color: var(--text); }
+        
+        /* ── ICON PICKER MODAL ── */
+        #iconPickerModal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.75);
+            z-index: 1100;
+            justify-content: center;
+            align-items: center;
+        }
+        #iconPickerModal.show { display: flex; }
+
+        .icon-picker-box {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 28px 24px;
+            width: 320px;
+            position: relative;
+        }
+
+        .icon-picker-title {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 22px;
+            letter-spacing: 2px;
+            margin-bottom: 6px;
+        }
+
+        .icon-picker-sub {
+            font-size: 11px;
+            color: var(--muted);
+            margin-bottom: 20px;
+        }
+
+        .icon-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .icon-option {
+            border-radius: 10px;
+            border: 2px solid transparent;
+            cursor: pointer;
+            transition: border-color 0.15s, transform 0.1s;
+            overflow: hidden;
+            aspect-ratio: 1;
+        }
+        .icon-option img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+        .icon-option:hover { border-color: var(--muted); transform: scale(1.05); }
+        .icon-option.selected { border-color: var(--accent); }
+
+        .icon-picker-confirm {
+            width: 100%;
+            padding: 12px;
+            background: var(--accent);
+            border: none;
+            border-radius: 8px;
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 18px;
+            letter-spacing: 2px;
+            color: #0a0a0f;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+        .icon-picker-confirm:hover { opacity: 0.85; }
+        .icon-picker-confirm:disabled { opacity: 0.4; cursor: default; }
+
+        .icon-picker-close {
+            position: absolute;
+            top: 14px;
+            right: 16px;
+            background: none;
+            border: none;
+            color: var(--muted);
+            font-size: 18px;
+            cursor: pointer;
+        }
+        .icon-picker-close:hover { color: var(--text); }
         </style>
 </head>
 <body>
@@ -1115,7 +1201,7 @@
         <div class="user-bar">
             <div class="user-left">
                 <img id="userRankIcon" class="rank-icon" src="/static/ranks/bronze3.png" alt="Rank" title="Click to view all ranks" style="cursor:pointer;" onclick="toggleRankModal()">
-                <div class="user-avatar" id="avatarLetter">?</div>
+                <img id="userIconImg" src="/static/icons/icon1.png" alt="Profile Icon" title="Click to change icon" style="width:36px;height:36px;border-radius:8px;object-fit:cover;cursor:pointer;" onclick="openIconPicker()">
                 <div style="flex:1;">
                     <div class="user-name-display" id="displayUsername"></div>
                     <div class="user-stats-bar">
@@ -1137,6 +1223,7 @@
         <!-- Players bar -->
         <div class="players-bar" id="playersBar">
             <div class="player-tag">
+                <img id="xPlayerIcon" src="/static/icons/icon1.png" alt="" style="width:28px;height:28px;border-radius:6px;object-fit:cover;margin-right:6px;">
                 <div class="piece-icon x">X</div>
                 <span class="player-tag-name" id="xPlayer">—</span>
             </div>
@@ -1144,6 +1231,7 @@
             <div class="player-tag right">
                 <span class="player-tag-name" id="oPlayer">—</span>
                 <div class="piece-icon o">O</div>
+                <img id="oPlayerIcon" src="/static/icons/icon1.png" alt="" style="width:28px;height:28px;border-radius:6px;object-fit:cover;margin-left:6px;">
             </div>
         </div>
 
@@ -1271,6 +1359,17 @@
 <script src="https://cdn.socket.io/4.5.4/socket.io.min.js">
 </script>
 
+    <!-- Icon Picker Modal -->
+    <div id="iconPickerModal">
+        <div class="icon-picker-box">
+            <button class="icon-picker-close" onclick="closeIconPicker()">✕</button>
+            <div class="icon-picker-title">CHOOSE ICON</div>
+            <div class="icon-picker-sub">Your icon is permanent — pick wisely.</div>
+            <div class="icon-grid" id="iconGrid"></div>
+            <button class="icon-picker-confirm" id="iconConfirmBtn" onclick="confirmIconChange()" disabled>Confirm</button>
+        </div>
+    </div>
+
     <!-- Rank Ladder Modal -->
     <div id="rankModal">
         <div class="rank-modal-box">
@@ -1284,7 +1383,7 @@
     // ═══════════════════════════════════════════════════════
     //  DEBUG CONSOLE
     // ═══════════════════════════════════════════════════════
-    const VERSION = 'v2.05/Alpha - Fixes';
+    const VERSION = 'v2.10/Alpha - ICONS';
     document.querySelector('.version-tag').textContent = VERSION;
 
     // ═══════════════════════════════════════════════════════
@@ -1409,6 +1508,7 @@
     let gameId       = null;
     let myMark       = null;
     let username     = null;
+    let myIcon       = 'icon1.png';
     let opponentName = null;
     let isMyTurn     = false;
     let userStats    = { wins: 0, losses: 0, rank: 1000 };
@@ -1536,7 +1636,8 @@
         document.getElementById('gameScreen').classList.add('show');
         document.getElementById('headerBtns').style.display = 'flex';
         document.getElementById('displayUsername').textContent = username;
-        document.getElementById('avatarLetter').textContent = username[0].toUpperCase();
+        document.getElementById('userIconImg').src = `/static/icons/${data.icon || 'icon1.png'}`;
+        myIcon = data.icon || 'icon1.png';
         updateStatsDisplay();
     }
 
@@ -1619,6 +1720,8 @@
         document.getElementById('endOverlay').classList.remove('show');
         document.getElementById('xPlayer').textContent = data.x_player;
         document.getElementById('oPlayer').textContent = data.o_player;
+        document.getElementById('xPlayerIcon').src = `/static/icons/${data.x_icon || 'icon1.png'}`;
+        document.getElementById('oPlayerIcon').src = `/static/icons/${data.o_icon || 'icon1.png'}`;
 
         updateMatchPips();
         resetBoardDOM();
@@ -1947,6 +2050,8 @@
 
         document.getElementById('xPlayer').textContent = data.x_player;
         document.getElementById('oPlayer').textContent = data.o_player;
+        document.getElementById('xPlayerIcon').src = `/static/icons/${data.x_icon || 'icon1.png'}`;
+        document.getElementById('oPlayerIcon').src = `/static/icons/${data.o_icon || 'icon1.png'}`;
         document.getElementById('endOverlay').classList.remove('show');
 
         updateMatchPips();
@@ -2234,6 +2339,68 @@
 
     document.getElementById('rankModal').addEventListener('click', e => {
         if (e.target === document.getElementById('rankModal')) toggleRankModal();
+    });
+
+
+    // ═══════════════════════════════════════════════════════
+    //  ICON PICKER
+    // ═══════════════════════════════════════════════════════
+    let pendingIcon = null;
+
+    function openIconPicker() {
+        // Only allow in menu (not during active game)
+        if (gameId) return;
+        buildIconGrid();
+        document.getElementById('iconPickerModal').classList.add('show');
+    }
+
+    function closeIconPicker() {
+        document.getElementById('iconPickerModal').classList.remove('show');
+        pendingIcon = null;
+        document.getElementById('iconConfirmBtn').disabled = true;
+    }
+
+    function buildIconGrid() {
+        const grid = document.getElementById('iconGrid');
+        grid.innerHTML = '';
+        for (let i = 1; i <= 10; i++) {
+            const filename = `icon${i}.png`;
+            const div = document.createElement('div');
+            div.className = 'icon-option' + (filename === myIcon ? ' selected' : '');
+            div.dataset.icon = filename;
+            div.onclick = () => selectIcon(filename);
+
+            const img = document.createElement('img');
+            img.src = `/static/icons/${filename}`;
+            img.alt = `Icon ${i}`;
+            div.appendChild(img);
+            grid.appendChild(div);
+        }
+    }
+
+    function selectIcon(filename) {
+        // Deselect all, select clicked
+        document.querySelectorAll('.icon-option').forEach(el => el.classList.remove('selected'));
+        document.querySelector(`.icon-option[data-icon="${filename}"]`).classList.add('selected');
+        pendingIcon = filename;
+        // Only enable confirm if it's different from current
+        document.getElementById('iconConfirmBtn').disabled = (filename === myIcon);
+    }
+
+    function confirmIconChange() {
+        if (!pendingIcon || pendingIcon === myIcon) return;
+        socket.emit('update_icon', { icon: pendingIcon });
+    }
+
+    socket.on('icon_updated', data => {
+        myIcon = data.icon;
+        document.getElementById('userIconImg').src = `/static/icons/${data.icon}`;
+        closeIconPicker();
+    });
+
+    // Close on backdrop click
+    document.getElementById('iconPickerModal').addEventListener('click', e => {
+        if (e.target === document.getElementById('iconPickerModal')) closeIconPicker();
     });
 
 </script>

@@ -19,6 +19,7 @@ socketio = SocketIO(app, cors_allowed_origins=_cors_setting, async_mode='gevent'
 games = {}
 waiting_room = []
 player_usernames = {}
+player_icons = {}        # sid -> icon filename
 active_sessions = {}       # sid -> username
 username_to_sid = {}       # username -> sid (enforces single active session per user)
 rematch_requests = {}      # game_id -> set of player sids who requested rematch
@@ -145,6 +146,14 @@ def init_db():
                     ) THEN
                         ALTER TABLE users ADD COLUMN floor_shield_mmr INTEGER DEFAULT -1;
                     END IF;
+
+                    -- Add icon: permanently assigned profile icon filename (icon1-10.png)
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns 
+                        WHERE table_name = 'users' AND column_name = 'icon'
+                    ) THEN
+                        ALTER TABLE users ADD COLUMN icon TEXT DEFAULT 'icon1.png';
+                    END IF;
                 END $$;
             ''')
         conn.commit()
@@ -158,23 +167,25 @@ def get_user(username):
 
 
 def create_user(username, password):
+    import random
+    icon = f"icon{random.randint(1, 10)}.png"
     try:
         with get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "INSERT INTO users (username, password) VALUES (%s, %s)",
-                    (username, generate_password_hash(password))
+                    "INSERT INTO users (username, password, icon) VALUES (%s, %s, %s)",
+                    (username, generate_password_hash(password), icon)
                 )
             conn.commit()
-        return True
+        return icon
     except psycopg2.errors.UniqueViolation:
-        return False
+        return None
 
 
 def authenticate_user(username, password):
     user = get_user(username)
     if user and check_password_hash(user['password'], password):
-        return {'username': username, 'wins': user['wins'], 'losses': user['losses'], 'rank': user['rank']}
+        return {'username': username, 'wins': user['wins'], 'losses': user['losses'], 'rank': user['rank'], 'icon': user.get('icon', 'icon1.png')}
     return None
 
 
@@ -458,7 +469,7 @@ def handle_login(data):
         _kick_existing_session(username)
         active_sessions[request.sid] = username
         username_to_sid[username] = request.sid
-        emit('login_success', {'username': username, 'stats': {'wins': user_data['wins'], 'losses': user_data['losses'],
+        emit('login_success', {'username': username, 'icon': user_data['icon'], 'stats': {'wins': user_data['wins'], 'losses': user_data['losses'],
                                                                'rank': user_data['rank']}})
     else:
         user = get_user(username)
@@ -469,11 +480,12 @@ def handle_login(data):
             # Use a generic message to avoid confirming whether the account exists
             emit('login_failed', {'message': 'Incorrect username or password.'})
         else:
-            if create_user(username, password):
+            assigned_icon = create_user(username, password)
+            if assigned_icon:
                 _kick_existing_session(username)
                 active_sessions[request.sid] = username
                 username_to_sid[username] = request.sid
-                emit('login_success', {'username': username, 'stats': {'wins': 0, 'losses': 0, 'rank': 1000}})
+                emit('login_success', {'username': username, 'icon': assigned_icon, 'stats': {'wins': 0, 'losses': 0, 'rank': 1000}})
             else:
                 emit('login_failed', {'message': 'Incorrect username or password.'})
 
@@ -489,6 +501,8 @@ def handle_find_game(data):
 
     username = active_sessions[request.sid]
     player_usernames[player_id] = username
+    _u = get_user(username)
+    player_icons[player_id] = _u.get('icon', 'icon1.png') if _u else 'icon1.png'
 
     if any(player_id in (g.x_player, g.o_player) for g in games.values()):
         emit('waiting', {'message': 'You are already in a game.'})
@@ -532,11 +546,14 @@ def handle_find_game(data):
         join_room(game_id, sid=opp_id)
         join_room(game_id, sid=player_id)
 
+        opp_icon = player_icons.get(opp_id, 'icon1.png')
+        my_icon  = player_icons.get(player_id, 'icon1.png')
         emit('game_start', {'game_id': game_id, 'mark': 'X', 'first_turn': 'X', 'new_match': True,
-                            'opponent_name': username, 'x_player': opp_username, 'o_player': username}, room=opp_id)
+                            'opponent_name': username, 'x_player': opp_username, 'o_player': username,
+                            'x_icon': opp_icon, 'o_icon': my_icon}, room=opp_id)
         emit('game_start', {'game_id': game_id, 'mark': 'O', 'first_turn': 'X', 'new_match': True,
-                            'opponent_name': opp_username, 'x_player': opp_username, 'o_player': username},
-             room=player_id)
+                            'opponent_name': opp_username, 'x_player': opp_username, 'o_player': username,
+                            'x_icon': opp_icon, 'o_icon': my_icon}, room=player_id)
         # Start server-side turn timer — X goes first
         socketio.start_background_task(schedule_timeout, game_id, game.turn_token)
     else:
@@ -859,12 +876,14 @@ def handle_rematch(data):
         join_room(new_game_id, sid=game.x_player)
         join_room(new_game_id, sid=game.o_player)
 
+        rx_icon = player_icons.get(game.x_player, 'icon1.png')
+        ro_icon = player_icons.get(game.o_player, 'icon1.png')
         emit('rematch_start', {'game_id': new_game_id, 'mark': 'X', 'first_turn': first, 'new_match': new_match,
                                'opponent_name': game.o_username, 'x_player': game.x_username,
-                               'o_player': game.o_username}, room=game.x_player)
+                               'o_player': game.o_username, 'x_icon': rx_icon, 'o_icon': ro_icon}, room=game.x_player)
         emit('rematch_start', {'game_id': new_game_id, 'mark': 'O', 'first_turn': first, 'new_match': new_match,
                                'opponent_name': game.x_username, 'x_player': game.x_username,
-                               'o_player': game.o_username}, room=game.o_player)
+                               'o_player': game.o_username, 'x_icon': rx_icon, 'o_icon': ro_icon}, room=game.o_player)
 
         del games[game_id]
         # Start server-side turn timer for the rematch
@@ -942,6 +961,31 @@ def handle_leaderboard():
     emit('leaderboard_data', {'leaderboard': get_leaderboard()})
 
 
+@socketio.on('update_icon')
+def handle_update_icon(data):
+    player_id = request.sid
+    if player_id not in active_sessions:
+        emit('error', {'message': 'Not authenticated'})
+        return
+
+    icon = data.get('icon', '')
+    # SECURITY: Only allow icon1.png - icon10.png
+    import re as _re
+    if not _re.match(r'^icon([1-9]|10)\.png$', icon):
+        emit('error', {'message': 'Invalid icon'})
+        return
+
+    username = active_sessions[player_id]
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE users SET icon = %s WHERE username = %s", (icon, username))
+        conn.commit()
+
+    # Update in-memory cache
+    player_icons[player_id] = icon
+    emit('icon_updated', {'icon': icon})
+
+
 # ── DISCONNECT ────────────────────────────────────────────────────────────────
 
 @socketio.on('disconnect')
@@ -956,6 +1000,7 @@ def handle_disconnect():
         del username_to_sid[username]
 
     player_usernames.pop(player_id, None)
+    player_icons.pop(player_id, None)
     active_sessions.pop(player_id, None)
 
     for game_id, game in list(games.items()):
