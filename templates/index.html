@@ -1227,6 +1227,7 @@
     }
 
     function getRankColor(mmr) {
+        if (mmr >= 4500) return '#8d062d'; // Apex - idk
         if (mmr >= 3000) return '#1a1a2e'; // Onyx - dark
         if (mmr >= 2250) return '#2d1b3d'; // Obsidian - purple-black
         if (mmr >= 1900) return '#8b1538'; // Ruby - deep red
