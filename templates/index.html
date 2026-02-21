@@ -220,6 +220,15 @@
         .stat-w { color: var(--x-color); }
         .stat-l { color: var(--o-color); }
         .stat-d { color: var(--muted); }
+        
+        .rank-badge {
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+            font-size: 11px;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
 
         /* Status */
         #status {
@@ -1020,7 +1029,7 @@
                     <div class="user-stats-bar">
                         <span class="stat-w">W: <span id="userWins">0</span></span> ·
                         <span class="stat-l">L: <span id="userLosses">0</span></span> ·
-                        <span class="stat-r">Rank: <span id="userRank">1000</span></span>
+                        <span class="stat-r"><span id="userRank" class="rank-badge">Bronze 3</span></span>
                     </div>
                 </div>
             </div>
@@ -1165,8 +1174,53 @@
     // ═══════════════════════════════════════════════════════
     //  DEBUG CONSOLE
     // ═══════════════════════════════════════════════════════
-    const VERSION = 'v1.7/Alpha - Rank System';
+    const VERSION = 'v1.75/Alpha - Rank System v1.5';
     document.querySelector('.version-tag').textContent = VERSION;
+
+    // ═══════════════════════════════════════════════════════
+    //  RANK SYSTEM
+    // ═══════════════════════════════════════════════════════
+    function getRankName(mmr) {
+        const ranks = [
+            { name: 'Bronze 3', mmr: 0 },
+            { name: 'Bronze 2', mmr: 1100 },
+            { name: 'Bronze 1', mmr: 1200 },
+            { name: 'Silver 3', mmr: 1300 },
+            { name: 'Silver 2', mmr: 1400 },
+            { name: 'Silver 1', mmr: 1500 },
+            { name: 'Gold 3', mmr: 1600 },
+            { name: 'Gold 2', mmr: 1700 },
+            { name: 'Gold 1', mmr: 1800 },
+            { name: 'Ruby 3', mmr: 1900 },
+            { name: 'Ruby 2', mmr: 2000 },
+            { name: 'Ruby 1', mmr: 2100 },
+            { name: 'Obsidian 3', mmr: 2250 },
+            { name: 'Obsidian 2', mmr: 2400 },
+            { name: 'Obsidian 1', mmr: 2550 },
+            { name: 'Onyx 3', mmr: 2700 },
+            { name: 'Onyx 2', mmr: 2850 },
+            { name: 'Onyx 1', mmr: 3000 }
+        ];
+        
+        // Find the highest rank the player qualifies for
+        let rankName = 'Bronze 3';
+        for (let i = ranks.length - 1; i >= 0; i--) {
+            if (mmr >= ranks[i].mmr) {
+                rankName = ranks[i].name;
+                break;
+            }
+        }
+        return rankName;
+    }
+
+    function getRankColor(mmr) {
+        if (mmr >= 3000) return '#1a1a2e'; // Onyx - dark
+        if (mmr >= 2250) return '#2d1b3d'; // Obsidian - purple-black
+        if (mmr >= 1900) return '#8b1538'; // Ruby - deep red
+        if (mmr >= 1600) return '#d4af37'; // Gold - gold
+        if (mmr >= 1300) return '#c0c0c0'; // Silver - silver
+        return '#cd7f32'; // Bronze - bronze
+    }
 
     function toggleDebug() {
         document.getElementById('debugConsole').classList.toggle('open');
@@ -1325,7 +1379,13 @@
     function updateStatsDisplay() {
         document.getElementById('userWins').textContent   = userStats.wins;
         document.getElementById('userLosses').textContent = userStats.losses;
-        document.getElementById('userRank').textContent   = userStats.rank;
+        const rankEl = document.getElementById('userRank');
+        const rankName = getRankName(userStats.rank);
+        const rankColor = getRankColor(userStats.rank);
+        rankEl.textContent = rankName;
+        rankEl.style.backgroundColor = rankColor;
+        rankEl.style.color = '#fff';
+        rankEl.title = `${userStats.rank} MMR`;
     }
 
     // ═══════════════════════════════════════════════════════
@@ -1869,12 +1929,14 @@
             const position = i + 1;
             const rankCls = position <= 3 ? `rank-${position}` : '';
             const isMe    = p.username === username;
+            const rankName = getRankName(p.rank);
+            const rankColor = getRankColor(p.rank);
             const tr      = document.createElement('tr');
             if (isMe) tr.classList.add('lb-me-row');
             tr.innerHTML = `
                 <td class="rank-num ${rankCls}">${position}</td>
                 <td class="${isMe ? 'lb-you' : ''}">${p.username}${isMe ? ' ← you' : ''}</td>
-                <td><strong>${p.rank}</strong></td>
+                <td><span class="rank-badge" style="background-color: ${rankColor}; color: #fff;" title="${p.rank} MMR">${rankName}</span></td>
                 <td>${p.wins}</td>
                 <td>${p.losses}</td>`;
             tbody.appendChild(tr);
