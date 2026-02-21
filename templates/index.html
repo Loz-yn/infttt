@@ -1269,89 +1269,22 @@
 </div>
 
 <script src="https://cdn.socket.io/4.5.4/socket.io.min.js">
-    // ═══════════════════════════════════════════════════════
-    //  RANK LADDER MODAL
-    // ═══════════════════════════════════════════════════════
-    const ALL_RANKS = [
-        { name: 'Apex',       mmr: 4500, icon: 'apex.png' },
-        { name: 'Onyx 1',     mmr: 3000, icon: 'onyx1.png' },
-        { name: 'Onyx 2',     mmr: 2850, icon: 'onyx2.png' },
-        { name: 'Onyx 3',     mmr: 2700, icon: 'onyx3.png' },
-        { name: 'Obsidian 1', mmr: 2550, icon: 'obsidian1.png' },
-        { name: 'Obsidian 2', mmr: 2400, icon: 'obsidian2.png' },
-        { name: 'Obsidian 3', mmr: 2250, icon: 'obsidian3.png' },
-        { name: 'Ruby 1',     mmr: 2100, icon: 'ruby1.png' },
-        { name: 'Ruby 2',     mmr: 2000, icon: 'ruby2.png' },
-        { name: 'Ruby 3',     mmr: 1900, icon: 'ruby3.png' },
-        { name: 'Gold 1',     mmr: 1800, icon: 'gold1.png' },
-        { name: 'Gold 2',     mmr: 1700, icon: 'gold2.png' },
-        { name: 'Gold 3',     mmr: 1600, icon: 'gold3.png' },
-        { name: 'Silver 1',   mmr: 1500, icon: 'silver1.png' },
-        { name: 'Silver 2',   mmr: 1400, icon: 'silver2.png' },
-        { name: 'Silver 3',   mmr: 1300, icon: 'silver3.png' },
-        { name: 'Bronze 1',   mmr: 1200, icon: 'bronze1.png' },
-        { name: 'Bronze 2',   mmr: 1100, icon: 'bronze2.png' },
-        { name: 'Bronze 3',   mmr: 0,    icon: 'bronze3.png' },
-    ];
-
-    function toggleRankModal() {
-        const modal = document.getElementById('rankModal');
-        const isOpen = modal.classList.toggle('show');
-        if (isOpen) buildRankLadder();
-    }
-
-    function buildRankLadder() {
-        const container = document.getElementById('rankLadder');
-        container.innerHTML = '';
-        const currentRank = getRankName(userStats ? userStats.rank : 0);
-
-        ALL_RANKS.forEach((rank, i) => {
-            // Connector line between ranks (not before the first)
-            if (i > 0) {
-                const connector = document.createElement('div');
-                connector.className = 'rank-ladder-connector';
-                container.appendChild(connector);
-            }
-
-            const item = document.createElement('div');
-            item.className = 'rank-ladder-item' + (rank.name === currentRank ? ' current-rank' : '');
-
-            const img = document.createElement('img');
-            img.src = `/static/ranks/${rank.icon}`;
-            img.alt = rank.name;
-
-            const nameEl = document.createElement('span');
-            nameEl.className = 'rank-ladder-name';
-            nameEl.textContent = rank.name;
-            if (rank.name === currentRank) nameEl.style.color = 'var(--accent)';
-
-            const mmrEl = document.createElement('span');
-            mmrEl.className = 'rank-ladder-mmr';
-            mmrEl.textContent = rank.mmr === 0 ? '0+' : `${rank.mmr}+`;
-
-            item.appendChild(img);
-            item.appendChild(nameEl);
-            item.appendChild(mmrEl);
-            container.appendChild(item);
-
-            // Auto-scroll current rank into view
-            if (rank.name === currentRank) {
-                setTimeout(() => item.scrollIntoView({ block: 'center', behavior: 'smooth' }), 50);
-            }
-        });
-    }
-
-    // Close modal when clicking backdrop
-    document.getElementById('rankModal').addEventListener('click', e => {
-        if (e.target === document.getElementById('rankModal')) toggleRankModal();
-    });
-
 </script>
+
+    <!-- Rank Ladder Modal -->
+    <div id="rankModal">
+        <div class="rank-modal-box">
+            <button class="rank-modal-close" onclick="toggleRankModal()">✕</button>
+            <div class="rank-modal-title">RANK LADDER</div>
+            <div class="rank-ladder" id="rankLadder"></div>
+        </div>
+    </div>
+
 <script>
     // ═══════════════════════════════════════════════════════
     //  DEBUG CONSOLE
     // ═══════════════════════════════════════════════════════
-    const VERSION = 'v2.05/Alpha';
+    const VERSION = 'v2.05/Alpha - Fixes';
     document.querySelector('.version-tag').textContent = VERSION;
 
     // ═══════════════════════════════════════════════════════
@@ -2228,17 +2161,83 @@
     document.getElementById('lbModal').addEventListener('click', e => {
         if (e.target === document.getElementById('lbModal')) closeLeaderboard();
     });
+
+    // ═══════════════════════════════════════════════════════
+    //  RANK LADDER MODAL
+    // ═══════════════════════════════════════════════════════
+    const ALL_RANKS = [
+        { name: 'Apex',       mmr: 4500, icon: 'apex.png' },
+        { name: 'Onyx 1',     mmr: 3000, icon: 'onyx1.png' },
+        { name: 'Onyx 2',     mmr: 2850, icon: 'onyx2.png' },
+        { name: 'Onyx 3',     mmr: 2700, icon: 'onyx3.png' },
+        { name: 'Obsidian 1', mmr: 2550, icon: 'obsidian1.png' },
+        { name: 'Obsidian 2', mmr: 2400, icon: 'obsidian2.png' },
+        { name: 'Obsidian 3', mmr: 2250, icon: 'obsidian3.png' },
+        { name: 'Ruby 1',     mmr: 2100, icon: 'ruby1.png' },
+        { name: 'Ruby 2',     mmr: 2000, icon: 'ruby2.png' },
+        { name: 'Ruby 3',     mmr: 1900, icon: 'ruby3.png' },
+        { name: 'Gold 1',     mmr: 1800, icon: 'gold1.png' },
+        { name: 'Gold 2',     mmr: 1700, icon: 'gold2.png' },
+        { name: 'Gold 3',     mmr: 1600, icon: 'gold3.png' },
+        { name: 'Silver 1',   mmr: 1500, icon: 'silver1.png' },
+        { name: 'Silver 2',   mmr: 1400, icon: 'silver2.png' },
+        { name: 'Silver 3',   mmr: 1300, icon: 'silver3.png' },
+        { name: 'Bronze 1',   mmr: 1200, icon: 'bronze1.png' },
+        { name: 'Bronze 2',   mmr: 1100, icon: 'bronze2.png' },
+        { name: 'Bronze 3',   mmr: 0,    icon: 'bronze3.png' },
+    ];
+
+    function toggleRankModal() {
+        const modal = document.getElementById('rankModal');
+        const isOpen = modal.classList.toggle('show');
+        if (isOpen) buildRankLadder();
+    }
+
+    function buildRankLadder() {
+        const container = document.getElementById('rankLadder');
+        container.innerHTML = '';
+        const currentRank = getRankName(userStats ? userStats.rank : 0);
+
+        ALL_RANKS.forEach((rank, i) => {
+            if (i > 0) {
+                const connector = document.createElement('div');
+                connector.className = 'rank-ladder-connector';
+                container.appendChild(connector);
+            }
+
+            const item = document.createElement('div');
+            item.className = 'rank-ladder-item' + (rank.name === currentRank ? ' current-rank' : '');
+
+            const img = document.createElement('img');
+            img.src = `/static/ranks/${rank.icon}`;
+            img.alt = rank.name;
+
+            const nameEl = document.createElement('span');
+            nameEl.className = 'rank-ladder-name';
+            nameEl.textContent = rank.name;
+            if (rank.name === currentRank) nameEl.style.color = 'var(--accent)';
+
+            const mmrEl = document.createElement('span');
+            mmrEl.className = 'rank-ladder-mmr';
+            mmrEl.textContent = rank.mmr === 0 ? '0+' : `${rank.mmr}+`;
+
+            item.appendChild(img);
+            item.appendChild(nameEl);
+            item.appendChild(mmrEl);
+            container.appendChild(item);
+
+            if (rank.name === currentRank) {
+                setTimeout(() => item.scrollIntoView({ block: 'center', behavior: 'smooth' }), 50);
+            }
+        });
+    }
+
+    document.getElementById('rankModal').addEventListener('click', e => {
+        if (e.target === document.getElementById('rankModal')) toggleRankModal();
+    });
+
 </script>
 
-
-    <!-- Rank Ladder Modal -->
-    <div id="rankModal">
-        <div class="rank-modal-box">
-            <button class="rank-modal-close" onclick="toggleRankModal()">✕</button>
-            <div class="rank-modal-title">RANK LADDER</div>
-            <div class="rank-ladder" id="rankLadder"></div>
-        </div>
-    </div>
 
 </body>
 </html>
