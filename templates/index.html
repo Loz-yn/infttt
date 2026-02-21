@@ -1056,10 +1056,6 @@
             </div>
         </div>
 
-        <!-- Mode badge + Players bar -->
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:0;">
-            <div id="modeBadge" style="display:none;padding:4px 12px;border-radius:6px;font-size:11px;letter-spacing:2px;text-transform:uppercase;font-family:'Bebas Neue',sans-serif;font-size:14px;"></div>
-        </div>
         <!-- Players bar -->
         <div class="players-bar" id="playersBar">
             <div class="player-tag">
@@ -1100,15 +1096,8 @@
         <!-- Status -->
         <div id="status" class="waiting">Click Find Game to start</div>
 
-        <!-- Find game buttons -->
-        <div id="findGameBtns" style="display:flex;gap:12px;justify-content:center;margin-bottom:24px;">
-            <button class="find-btn" id="findRankedBtn" style="flex:1;max-width:200px;border-color:#ff4d6d;color:#ff4d6d;" onclick="findGame('ranked')">
-                ⚔ Ranked
-            </button>
-            <button class="find-btn" id="findCasualBtn" style="flex:1;max-width:200px;border-color:#4dc9ff;color:#4dc9ff;" onclick="findGame('casual')">
-                ☁ Casual
-            </button>
-        </div>
+        <!-- Find game button -->
+        <button class="find-btn" id="findGameBtn">Find Game</button>
 
         <!-- Game layout -->
         <div class="game-layout" id="gameLayout">
@@ -1342,7 +1331,6 @@
     let opponentName = null;
     let isMyTurn     = false;
     let userStats    = { wins: 0, losses: 0, rank: 1000, demotion_shield: 3 };
-    let gameMode     = 'ranked';  // 'ranked' or 'casual'
     let isChatMinimized = false;
     let unreadCount  = 0;
 
@@ -1569,15 +1557,11 @@
     // ═══════════════════════════════════════════════════════
     //  MATCHMAKING
     // ═══════════════════════════════════════════════════════
-    function findGame(mode) {
-        gameMode = mode;
-        dbg(`finding ${mode} game...`, 'info');
-        const label = mode === 'ranked' ? 'Ranked' : 'Casual';
-        setStatus(`Searching for ${label} opponent...`, 'waiting');
-        // Hide both buttons, show cancel
-        document.getElementById('findGameBtns').style.display = 'none';
-        socket.emit('find_game', { username, mode });
-    }
+    document.getElementById('findGameBtn').addEventListener('click', () => {
+        dbg('finding game...', 'info');
+        setStatus('Searching for opponent...', 'waiting');
+        socket.emit('find_game', { username });
+    });
 
     socket.on('waiting', data => {
         dbg('in waiting room', 'info');
@@ -1602,17 +1586,7 @@
         board     = Array(9).fill(null);
         moveOrder = [];
 
-        gameMode = data.mode || 'ranked';
-        document.getElementById('findGameBtns').style.display = 'none';
-        // Show mode badge
-        const badge = document.getElementById('modeBadge');
-        if (gameMode === 'casual') {
-            badge.textContent = '☁ Casual';
-            badge.style.cssText += ';background:rgba(77,201,255,0.12);border:1px solid #4dc9ff;color:#4dc9ff;display:inline-block;';
-        } else {
-            badge.textContent = '⚔ Ranked';
-            badge.style.cssText += ';background:rgba(255,77,109,0.12);border:1px solid #ff4d6d;color:#ff4d6d;display:inline-block;';
-        }
+        document.getElementById('findGameBtn').style.display = 'none';
         document.getElementById('playersBar').classList.add('show');
         document.getElementById('matchBar').classList.add('show');
         document.getElementById('timerBar').classList.add('show');
@@ -1988,15 +1962,6 @@
         board     = Array(9).fill(null);
         moveOrder = [];
 
-        gameMode = data.mode || gameMode;
-        const badge2 = document.getElementById('modeBadge');
-        if (gameMode === 'casual') {
-            badge2.textContent = '☁ Casual';
-            badge2.style.cssText += ';background:rgba(77,201,255,0.12);border:1px solid #4dc9ff;color:#4dc9ff;display:inline-block;';
-        } else {
-            badge2.textContent = '⚔ Ranked';
-            badge2.style.cssText += ';background:rgba(255,77,109,0.12);border:1px solid #ff4d6d;color:#ff4d6d;display:inline-block;';
-        }
         document.getElementById('xPlayer').textContent = data.x_player;
         document.getElementById('oPlayer').textContent = data.o_player;
         document.getElementById('endOverlay').classList.remove('show');
@@ -2028,8 +1993,7 @@
     function fullReset() {
         dbg('fullReset()', 'warn');
         stopTimer();
-        document.getElementById('findGameBtns').style.display = 'flex';
-        document.getElementById('modeBadge').style.display = 'none';
+        document.getElementById('findGameBtn').style.display = 'block';
         document.getElementById('gameLayout').classList.remove('show');
         document.getElementById('playersBar').classList.remove('show');
         document.getElementById('matchBar').classList.remove('show');
