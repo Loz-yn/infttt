@@ -10,7 +10,8 @@ app.config['SECRET_KEY'] = 'ttt_secret_key'
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='gevent', manage_session=False)
 
 games = {}
-waiting_room = []
+waiting_casual = []        # queue for casual (no MMR change)
+waiting_ranked = []        # queue for ranked (MMR change)
 player_usernames = {}
 active_sessions = {}       # sid -> username
 username_to_sid = {}       # username -> sid (enforces single active session per user)
@@ -122,6 +123,15 @@ def init_db():
                     ) THEN
                         ALTER TABLE users ADD COLUMN rank INTEGER DEFAULT 1000;
                     END IF;
+
+                    -- Add demotion_shield column if it doesn't exist
+                    -- 3 charges protect you at a tier floor before you derank
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns 
+                        WHERE table_name = 'users' AND column_name = 'demotion_shield'
+                    ) THEN
+                        ALTER TABLE users ADD COLUMN demotion_shield INTEGER DEFAULT 3;
+                    END IF;
                 END $$;
             ''')
         conn.commit()
@@ -151,7 +161,8 @@ def create_user(username, password):
 def authenticate_user(username, password):
     user = get_user(username)
     if user and check_password_hash(user['password'], password):
-        return {'username': username, 'wins': user['wins'], 'losses': user['losses'], 'rank': user['rank']}
+        return {'username': username, 'wins': user['wins'], 'losses': user['losses'],
+                'rank': user['rank'], 'demotion_shield': user.get('demotion_shield', 3)}
     return None
 
 
@@ -175,27 +186,34 @@ def get_k_factor(rank, total_games):
     return 24
 
 
+DEMOTION_SHIELD_MAX = 3  # Max shield charges per tier floor
+
+
 def update_user_stats(username, result, opponent_username=None):
     """
-    Update user stats with improved ELO-style ranking system.
-    - Dynamic K-factor (lower at high ranks, higher for new players)
-    - Upset bonus: beating a much stronger opponent gives extra points
-    - Floor protection: you cannot drop below rank 0
+    Update user stats with ELO + demotion shield system.
+
+    Demotion shield:
+    - Each tier floor (e.g. 1300 Silver, 1900 Ruby, 2700 Onyx, 4500 Apex) has 3 shield charges.
+    - When you lose AT the exact floor MMR, a shield charge absorbs the loss instead of dropping you.
+    - Once all charges are gone, losses derank you normally (dropping below the floor into the tier below).
+    - Winning at the floor restores 1 charge (up to the max).
+    - Reaching a NEW, higher floor for the first time resets your shield to full (3 charges).
+
     result: 'win' or 'loss'
     """
     with get_conn() as conn:
         with conn.cursor() as cur:
-            # Update wins/losses
             if result == 'win':
                 cur.execute("UPDATE users SET wins = wins + 1 WHERE username = %s", (username,))
             else:
                 cur.execute("UPDATE users SET losses = losses + 1 WHERE username = %s", (username,))
 
-            # Calculate rank change if we have opponent info
             if opponent_username:
-                cur.execute("SELECT rank, wins, losses FROM users WHERE username = %s", (username,))
+                cur.execute("SELECT rank, wins, losses, demotion_shield FROM users WHERE username = %s", (username,))
                 row = cur.fetchone()
-                user_rank, user_wins, user_losses = row
+                user_rank, user_wins, user_losses, shield = row
+                shield = shield if shield is not None else DEMOTION_SHIELD_MAX
                 total_games = user_wins + user_losses
 
                 cur.execute("SELECT rank FROM users WHERE username = %s", (opponent_username,))
@@ -204,34 +222,88 @@ def update_user_stats(username, result, opponent_username=None):
                 # Dynamic K-factor
                 k = get_k_factor(user_rank, total_games)
 
-                # Standard ELO expected score
+                # Standard ELO
                 expected_score = 1 / (1 + 10 ** ((opp_rank - user_rank) / 400))
-                actual_score = 1.0 if result == 'win' else 0.0
+                actual_score   = 1.0 if result == 'win' else 0.0
+                rank_change    = k * (actual_score - expected_score)
 
-                rank_change = k * (actual_score - expected_score)
-
-                # Upset bonus: winning against a player 300+ MMR higher gives +20% extra
+                # Upset bonus / protection
                 if result == 'win' and opp_rank - user_rank >= 300:
                     rank_change *= 1.2
-                # Upset protection: losing against a player 300+ MMR lower caps the loss
                 elif result == 'loss' and user_rank - opp_rank >= 300:
                     rank_change = max(rank_change, -k * 0.5)
 
                 rank_change = int(rank_change)
+                rank_floor  = get_rank_floor(user_rank)
+                at_floor    = (user_rank <= rank_floor)  # sitting exactly at or below the tier floor
 
-                # Apply rank floor: can't fall below the entry MMR of the current tier
-                rank_floor = get_rank_floor(user_rank)
+                shield_event = None  # will be sent to client: 'blocked', 'restored', 'broken', None
 
-                # Update rank, enforcing the tier floor
+                if result == 'loss' and at_floor:
+                    if shield > 0:
+                        # Shield absorbs the loss — MMR unchanged, consume one charge
+                        shield -= 1
+                        rank_change = 0
+                        shield_event = 'blocked'
+                    else:
+                        # Shield depleted — derank normally (no floor protection this time)
+                        shield_event = 'broken'
+                        # rank_change is already negative, apply it freely (no floor clamp)
+                        cur.execute(
+                            "UPDATE users SET rank = GREATEST(0, rank + %s), demotion_shield = %s WHERE username = %s",
+                            (rank_change, DEMOTION_SHIELD_MAX, username)  # reset shield for the new (lower) tier
+                        )
+                        conn.commit()
+                        user = get_user(username)
+                        return {
+                            'wins': user['wins'], 'losses': user['losses'],
+                            'rank': user['rank'], 'demotion_shield': user.get('demotion_shield', DEMOTION_SHIELD_MAX),
+                            'shield_event': shield_event
+                        }
+
+                elif result == 'win':
+                    new_rank   = user_rank + rank_change
+                    new_floor  = get_rank_floor(new_rank)
+                    if new_floor > rank_floor:
+                        # Climbed into a new tier — reset shield to full
+                        shield = DEMOTION_SHIELD_MAX
+                    elif at_floor and shield < DEMOTION_SHIELD_MAX:
+                        # Won while sitting at the floor — restore 1 charge
+                        shield = min(DEMOTION_SHIELD_MAX, shield + 1)
+                        shield_event = 'restored'
+
+                    cur.execute(
+                        "UPDATE users SET rank = GREATEST(0, rank + %s), demotion_shield = %s WHERE username = %s",
+                        (rank_change, shield, username)
+                    )
+                    conn.commit()
+                    user = get_user(username)
+                    return {
+                        'wins': user['wins'], 'losses': user['losses'],
+                        'rank': user['rank'], 'demotion_shield': user.get('demotion_shield', DEMOTION_SHIELD_MAX),
+                        'shield_event': shield_event
+                    }
+
+                else:
+                    # Normal loss not at floor — apply with floor clamp
+                    cur.execute(
+                        "UPDATE users SET rank = GREATEST(%s, rank + %s), demotion_shield = %s WHERE username = %s",
+                        (rank_floor, rank_change, shield, username)
+                    )
+
                 cur.execute(
-                    "UPDATE users SET rank = GREATEST(%s, rank + %s) WHERE username = %s",
-                    (rank_floor, rank_change, username)
+                    "UPDATE users SET demotion_shield = %s WHERE username = %s",
+                    (shield, username)
                 )
 
         conn.commit()
 
     user = get_user(username)
-    return {'wins': user['wins'], 'losses': user['losses'], 'rank': user['rank']}
+    return {
+        'wins': user['wins'], 'losses': user['losses'],
+        'rank': user['rank'], 'demotion_shield': user.get('demotion_shield', DEMOTION_SHIELD_MAX),
+        'shield_event': shield_event
+    }
 
 
 def get_leaderboard():
@@ -249,8 +321,9 @@ MATCH_WINS_NEEDED = 2
 
 
 class TTTGame:
-    def __init__(self, game_id):
+    def __init__(self, game_id, mode='ranked'):
         self.id = game_id
+        self.mode = mode
         self.board = [None] * 9
         self.move_order = []
         self.turn = 'X'
@@ -339,9 +412,10 @@ def _kick_existing_session(username):
 
     print(f"[login] kicking old session {old_sid} for {username}", flush=True)
 
-    # Remove from waiting room
-    if old_sid in waiting_room:
-        waiting_room.remove(old_sid)
+    # Remove from either waiting queue
+    for q in (waiting_casual, waiting_ranked):
+        if old_sid in q:
+            q.remove(old_sid)
 
     # If mid-game, forfeit and notify opponent
     for game_id, game in list(games.items()):
@@ -375,7 +449,7 @@ def handle_login(data):
         active_sessions[request.sid] = username
         username_to_sid[username] = request.sid
         emit('login_success', {'username': username, 'stats': {'wins': user_data['wins'], 'losses': user_data['losses'],
-                                                               'rank': user_data['rank']}})
+                                                               'rank': user_data['rank'], 'demotion_shield': user_data.get('demotion_shield', 3)}})
     else:
         user = get_user(username)
         if user:
@@ -385,41 +459,20 @@ def handle_login(data):
                 _kick_existing_session(username)
                 active_sessions[request.sid] = username
                 username_to_sid[username] = request.sid
-                emit('login_success', {'username': username, 'stats': {'wins': 0, 'losses': 0, 'rank': 1000}})
+                emit('login_success', {'username': username, 'stats': {'wins': 0, 'losses': 0, 'rank': 1000, 'demotion_shield': 3}})
             else:
                 emit('login_failed', {'message': 'Failed to create account!'})
 
 
 # ── MATCHMAKING ───────────────────────────────────────────────────────────────
 
-@socketio.on('find_game')
-def handle_find_game(data):
-    player_id = request.sid
-    if request.sid not in active_sessions:
-        emit('error', {'message': 'Not authenticated'})
-        return
-
-    username = active_sessions[request.sid]
-    player_usernames[player_id] = username
-
-    if any(player_id in (g.x_player, g.o_player) for g in games.values()):
-        emit('waiting', {'message': 'You are already in a game.'})
-        return
-
-        # Ignore duplicate queue attempts from the same socket.
-    if player_id in waiting_room:
-        emit('waiting', {'message': 'Still searching for opponent...'})
-        return
-
-        # Find the first valid opponent that is not this same socket/username and is still active.
+def _find_opponent(queue, username, player_id):
     opp_id = None
-    while waiting_room:
-        candidate = waiting_room.pop(0)
+    while queue:
+        candidate = queue.pop(0)
         if candidate == player_id:
             continue
-        # Prevent same user playing against themselves from another tab
         if active_sessions.get(candidate) == username:
-            # Stale entry from a previous session — discard it
             player_usernames.pop(candidate, None)
             continue
         if any(candidate in (g.x_player, g.o_player) for g in games.values()):
@@ -429,12 +482,40 @@ def handle_find_game(data):
             continue
         opp_id = candidate
         break
+    return opp_id
+
+
+@socketio.on('find_game')
+def handle_find_game(data):
+    player_id = request.sid
+    if request.sid not in active_sessions:
+        emit('error', {'message': 'Not authenticated'})
+        return
+
+    mode = data.get('mode', 'ranked')
+    if mode not in ('ranked', 'casual'):
+        mode = 'ranked'
+
+    username = active_sessions[request.sid]
+    player_usernames[player_id] = username
+
+    if any(player_id in (g.x_player, g.o_player) for g in games.values()):
+        emit('waiting', {'message': 'You are already in a game.'})
+        return
+
+    queue = waiting_ranked if mode == 'ranked' else waiting_casual
+
+    if player_id in queue:
+        emit('waiting', {'message': 'Still searching for opponent...'})
+        return
+
+    opp_id = _find_opponent(queue, username, player_id)
 
     if opp_id:
         opp_username = player_usernames.get(opp_id, 'Anonymous')
         game_id = str(uuid.uuid4())
 
-        game = TTTGame(game_id)
+        game = TTTGame(game_id, mode=mode)
         game.x_player = opp_id
         game.o_player = player_id
         game.x_username = opp_username
@@ -444,14 +525,14 @@ def handle_find_game(data):
         join_room(game_id, sid=opp_id)
         join_room(game_id, sid=player_id)
 
-        emit('game_start', {'game_id': game_id, 'mark': 'X', 'first_turn': 'X', 'new_match': True,
-                            'opponent_name': username, 'x_player': opp_username, 'o_player': username}, room=opp_id)
-        emit('game_start', {'game_id': game_id, 'mark': 'O', 'first_turn': 'X', 'new_match': True,
-                            'opponent_name': opp_username, 'x_player': opp_username, 'o_player': username},
-             room=player_id)
+        base = {'game_id': game_id, 'first_turn': 'X', 'new_match': True,
+                'x_player': opp_username, 'o_player': username, 'mode': mode}
+        emit('game_start', {**base, 'mark': 'X', 'opponent_name': username}, room=opp_id)
+        emit('game_start', {**base, 'mark': 'O', 'opponent_name': opp_username}, room=player_id)
     else:
-        waiting_room.append(player_id)
-        emit('waiting', {'message': 'Waiting for opponent...'})
+        queue.append(player_id)
+        label = 'Ranked' if mode == 'ranked' else 'Casual'
+        emit('waiting', {'message': f'Searching for {label} opponent...'})
 
 
 # ── MOVES ─────────────────────────────────────────────────────────────────────
@@ -560,18 +641,20 @@ def handle_make_move(data):
         stats_x = stats_o = None
         if game_over and winner:
             game.match_score[winner] += 1
-            # Update both players' stats with opponent info for ELO calculation
-            stats_x = update_user_stats(
-                game.x_username,
-                'win' if winner == 'X' else 'loss',
-                opponent_username=game.o_username
-            )
-            stats_o = update_user_stats(
-                game.o_username,
-                'win' if winner == 'O' else 'loss',
-                opponent_username=game.x_username
-            )
-            print(f"[make_move] stats updated x={stats_x} o={stats_o}", flush=True)
+            if game.mode == 'ranked':
+                stats_x = update_user_stats(
+                    game.x_username,
+                    'win' if winner == 'X' else 'loss',
+                    opponent_username=game.o_username
+                )
+                stats_o = update_user_stats(
+                    game.o_username,
+                    'win' if winner == 'O' else 'loss',
+                    opponent_username=game.x_username
+                )
+                print(f"[make_move] ranked stats updated x={stats_x} o={stats_o}", flush=True)
+            else:
+                print(f"[make_move] casual game — no MMR change", flush=True)
 
         payload_base = {'index': index, 'mark': mark, 'removed_index': removed_index,
                         'game_over': game_over, 'winner': winner,
@@ -612,7 +695,7 @@ def _start_next_round(game_id):
 
     print(f"[next_round] creating new game {new_game_id} round={game.round} first={first}", flush=True)
 
-    new_game = TTTGame(new_game_id)
+    new_game = TTTGame(new_game_id, mode=game.mode)
     new_game.x_player = game.x_player
     new_game.o_player = game.o_player
     new_game.x_username = game.x_username
@@ -623,16 +706,14 @@ def _start_next_round(game_id):
     games[new_game_id] = new_game
 
     print(f"[next_round] new game turn={new_game.turn} emitting to X sid={game.x_player}", flush=True)
-    socketio.emit('rematch_start', {
-        'game_id': new_game_id, 'mark': 'X', 'first_turn': first, 'new_match': False,
-        'opponent_name': game.o_username, 'x_player': game.x_username, 'o_player': game.o_username
-    }, room=game.x_player, namespace='/')
+    _base_n = {'game_id': new_game_id, 'first_turn': first, 'new_match': False,
+               'x_player': game.x_username, 'o_player': game.o_username, 'mode': game.mode}
+    socketio.emit('rematch_start', {**_base_n, 'mark': 'X', 'opponent_name': game.o_username},
+                  room=game.x_player, namespace='/')
 
     print(f"[next_round] emitting to O sid={game.o_player}", flush=True)
-    socketio.emit('rematch_start', {
-        'game_id': new_game_id, 'mark': 'O', 'first_turn': first, 'new_match': False,
-        'opponent_name': game.x_username, 'x_player': game.x_username, 'o_player': game.o_username
-    }, room=game.o_player, namespace='/')
+    socketio.emit('rematch_start', {**_base_n, 'mark': 'O', 'opponent_name': game.x_username},
+                  room=game.o_player, namespace='/')
 
     del games[game_id]
     print(f"[next_round] old game deleted", flush=True)
@@ -681,16 +762,17 @@ def handle_timeout(data):
     stats_x = stats_o = None
     if game_over and winner:
         game.match_score[winner] += 1
-        stats_x = update_user_stats(
-            game.x_username,
-            'win' if winner == 'X' else 'loss',
-            opponent_username=game.o_username
-        )
-        stats_o = update_user_stats(
-            game.o_username,
-            'win' if winner == 'O' else 'loss',
-            opponent_username=game.x_username
-        )
+        if game.mode == 'ranked':
+            stats_x = update_user_stats(
+                game.x_username,
+                'win' if winner == 'X' else 'loss',
+                opponent_username=game.o_username
+            )
+            stats_o = update_user_stats(
+                game.o_username,
+                'win' if winner == 'O' else 'loss',
+                opponent_username=game.x_username
+            )
 
     payload_base = {
         'index': random_index,
@@ -748,7 +830,7 @@ def handle_rematch(data):
         new_game_id = str(uuid.uuid4())
 
         # Create a continuation game with same players
-        new_game = TTTGame(new_game_id)
+        new_game = TTTGame(new_game_id, mode=game.mode)
         new_game.x_player = game.x_player
         new_game.o_player = game.o_player
         new_game.x_username = game.x_username
@@ -760,12 +842,10 @@ def handle_rematch(data):
         join_room(new_game_id, sid=game.x_player)
         join_room(new_game_id, sid=game.o_player)
 
-        emit('rematch_start', {'game_id': new_game_id, 'mark': 'X', 'first_turn': first, 'new_match': new_match,
-                               'opponent_name': game.o_username, 'x_player': game.x_username,
-                               'o_player': game.o_username}, room=game.x_player)
-        emit('rematch_start', {'game_id': new_game_id, 'mark': 'O', 'first_turn': first, 'new_match': new_match,
-                               'opponent_name': game.x_username, 'x_player': game.x_username,
-                               'o_player': game.o_username}, room=game.o_player)
+        _base_r = {'game_id': new_game_id, 'first_turn': first, 'new_match': new_match,
+                   'x_player': game.x_username, 'o_player': game.o_username, 'mode': game.mode}
+        emit('rematch_start', {**_base_r, 'mark': 'X', 'opponent_name': game.o_username}, room=game.x_player)
+        emit('rematch_start', {**_base_r, 'mark': 'O', 'opponent_name': game.x_username}, room=game.o_player)
 
         del games[game_id]
 
@@ -843,8 +923,9 @@ def handle_leaderboard():
 @socketio.on('disconnect')
 def handle_disconnect():
     player_id = request.sid
-    if player_id in waiting_room:
-        waiting_room.remove(player_id)
+    for q in (waiting_casual, waiting_ranked):
+        if player_id in q:
+            q.remove(player_id)
 
     # Clean up username -> sid mapping only if this sid is still the active one
     username = active_sessions.get(player_id)

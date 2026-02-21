@@ -1056,6 +1056,10 @@
             </div>
         </div>
 
+        <!-- Mode badge + Players bar -->
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:0;">
+            <div id="modeBadge" style="display:none;padding:4px 12px;border-radius:6px;font-size:11px;letter-spacing:2px;text-transform:uppercase;font-family:'Bebas Neue',sans-serif;font-size:14px;"></div>
+        </div>
         <!-- Players bar -->
         <div class="players-bar" id="playersBar">
             <div class="player-tag">
@@ -1096,8 +1100,15 @@
         <!-- Status -->
         <div id="status" class="waiting">Click Find Game to start</div>
 
-        <!-- Find game button -->
-        <button class="find-btn" id="findGameBtn">Find Game</button>
+        <!-- Find game buttons -->
+        <div id="findGameBtns" style="display:flex;gap:12px;justify-content:center;margin-bottom:24px;">
+            <button class="find-btn" id="findRankedBtn" style="flex:1;max-width:200px;border-color:#ff4d6d;color:#ff4d6d;" onclick="findGame('ranked')">
+                ⚔ Ranked
+            </button>
+            <button class="find-btn" id="findCasualBtn" style="flex:1;max-width:200px;border-color:#4dc9ff;color:#4dc9ff;" onclick="findGame('casual')">
+                ☁ Casual
+            </button>
+        </div>
 
         <!-- Game layout -->
         <div class="game-layout" id="gameLayout">
@@ -1262,11 +1273,19 @@
         return 0;                      // Bronze 3 — no floor
     }
 
-    // Next rank threshold above current MMR (for progress bar ceiling)
+    // Next rank threshold above current MMR (bar ceiling)
     function getNextRankThreshold(mmr) {
         const thresholds = [1100,1200,1300,1400,1500,1600,1700,1800,1900,2000,2100,2250,2400,2550,2700,2850,3000,4500];
         for (const t of thresholds) { if (mmr < t) return t; }
-        return mmr; // Already at Apex ceiling
+        return mmr; // Apex
+    }
+
+    // Current rank entry threshold (bar left edge — the rank you're IN right now)
+    function getCurrentRankThreshold(mmr) {
+        const thresholds = [0,1100,1200,1300,1400,1500,1600,1700,1800,1900,2000,2100,2250,2400,2550,2700,2850,3000,4500];
+        let current = 0;
+        for (const t of thresholds) { if (mmr >= t) current = t; }
+        return current;
     }
 
     function toggleDebug() {
@@ -1322,7 +1341,8 @@
     let username     = null;
     let opponentName = null;
     let isMyTurn     = false;
-    let userStats    = { wins: 0, losses: 0, rank: 1000 };
+    let userStats    = { wins: 0, losses: 0, rank: 1000, demotion_shield: 3 };
+    let gameMode     = 'ranked';  // 'ranked' or 'casual'
     let isChatMinimized = false;
     let unreadCount  = 0;
 
@@ -1396,6 +1416,7 @@
     socket.on('login_success', data => {
         username  = data.username;
         userStats = data.stats;
+        userStats.demotion_shield = data.stats.demotion_shield ?? 3;
         localStorage.setItem('tttUser', username);
         localStorage.setItem('tttPass', document.getElementById('password').value);
         dbg(`logged in as ${username}`, 'ok');
@@ -1474,54 +1495,89 @@
         // Update MMR label
         document.getElementById('userMmr').textContent = `${mmr} MMR`;
 
-        // ── MMR progress bar with tier floor indicator ──
-        const floor = getRankFloor(mmr);
-        const next  = getNextRankThreshold(mmr);
-        const isApex = mmr >= 4500;
+        // ── Demotion shield indicator ──
+        const shield    = userStats.demotion_shield ?? 3;
+        const floor     = getRankFloor(mmr);
+        const atFloor   = mmr <= floor && floor > 0;
+        let shieldEl    = document.getElementById('demotionShield');
+        if (!shieldEl) {
+            shieldEl = document.createElement('div');
+            shieldEl.id = 'demotionShield';
+            shieldEl.style.cssText = 'margin-top:5px;display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted);';
+            document.getElementById('mmrBarWrap').after(shieldEl);
+        }
+        if (floor > 0) {
+            const pips = Array.from({length: 3}, (_, i) => {
+                const active = i < shield;
+                const color  = active ? '#4dc9ff' : 'var(--border)';
+                return `<span title="${active ? 'Shield charge' : 'Charge spent'}" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${color};border:1px solid ${active ? '#4dc9ff' : 'var(--muted)'};transition:background 0.3s;"></span>`;
+            }).join('');
+            const label = atFloor
+                ? `<span style="color:#4dc9ff;">🛡 Demotion shield: ${shield}/3</span>`
+                : `<span>🛡 Shield: ${shield}/3</span>`;
+            shieldEl.innerHTML = pips + ' ' + label;
+            shieldEl.style.display = 'flex';
+        } else {
+            shieldEl.style.display = 'none';
+        }
 
-        // Progress within the current segment (floor → next threshold)
-        const segLen  = isApex ? 1 : (next - floor);
-        const segPos  = isApex ? 1 : Math.max(0, mmr - floor);
-        const pct     = isApex ? 100 : Math.min(100, Math.round((segPos / segLen) * 100));
+        // ── MMR XP-style progress bar (current rank → next rank) ──
+        const isApex   = mmr >= 4500;
+        const rankBase = getCurrentRankThreshold(mmr); // left edge = entry of current rank
+        const next     = getNextRankThreshold(mmr);    // right edge = next rank entry
+        const floor    = getRankFloor(mmr);            // tier floor (may be below rankBase)
+
+        const segLen = isApex ? 1 : (next - rankBase);
+        const segPos = isApex ? 1 : Math.max(0, mmr - rankBase);
+        const pct    = isApex ? 100 : Math.min(100, Math.round((segPos / segLen) * 100));
 
         // Fill bar
         const fill = document.getElementById('mmrBarFill');
         fill.style.width      = pct + '%';
         fill.style.background = rankColor;
 
-        // Floor marker: show as a vertical line at the floor position in the bar
-        const marker      = document.getElementById('mmrFloorMarker');
-        const floorLabel  = document.getElementById('mmrFloorLabel');
-        const nextLabel   = document.getElementById('mmrNextLabel');
+        const marker     = document.getElementById('mmrFloorMarker');
+        const floorLabel = document.getElementById('mmrFloorLabel');
+        const nextLabel  = document.getElementById('mmrNextLabel');
 
-        if (floor > 0 && !isApex) {
-            // Floor marker sits at the leftmost edge of the bar (0%), since the
-            // bar range starts at floor. Visually pin it so player sees the boundary.
-            marker.style.display = 'block';
-            marker.style.left    = '0%';
-            marker.title         = `Tier floor: ${floor} MMR — you can't drop below this`;
-            floorLabel.textContent = `⬤ ${floor} floor`;
-            nextLabel.textContent  = `${next} →`;
-        } else if (isApex) {
-            marker.style.display   = 'none';
+        // Labels: "1750 / 1800" style
+        if (isApex) {
+            nextLabel.textContent  = 'MAX RANK';
             floorLabel.textContent = '';
-            nextLabel.textContent  = 'Apex — Max Rank';
+            marker.style.display   = 'none';
         } else {
-            // Bronze 3 — no floor
-            marker.style.display   = 'none';
-            floorLabel.textContent = '';
-            nextLabel.textContent  = `${next} →`;
+            nextLabel.textContent = `${mmr} / ${next} MMR`;
+            // Show floor notch only if the tier floor is below current rank entry
+            // (i.e. you're above the floor within the tier — marker shows where you'd stop)
+            if (floor > 0 && floor < rankBase) {
+                // Floor is below the current rank, so no visible marker needed inside this bar segment
+                marker.style.display   = 'none';
+                floorLabel.textContent = `🛡 floor: ${floor}`;
+            } else if (floor > 0 && floor === rankBase) {
+                // Sitting exactly at the floor rank — mark left edge
+                marker.style.display = 'block';
+                marker.style.left    = '0%';
+                marker.title         = `Tier floor: ${floor} MMR`;
+                floorLabel.textContent = `🛡 floor`;
+            } else {
+                marker.style.display   = 'none';
+                floorLabel.textContent = '';
+            }
         }
     }
 
     // ═══════════════════════════════════════════════════════
     //  MATCHMAKING
     // ═══════════════════════════════════════════════════════
-    document.getElementById('findGameBtn').addEventListener('click', () => {
-        dbg('finding game...', 'info');
-        setStatus('Searching for opponent...', 'waiting');
-        socket.emit('find_game', { username });
-    });
+    function findGame(mode) {
+        gameMode = mode;
+        dbg(`finding ${mode} game...`, 'info');
+        const label = mode === 'ranked' ? 'Ranked' : 'Casual';
+        setStatus(`Searching for ${label} opponent...`, 'waiting');
+        // Hide both buttons, show cancel
+        document.getElementById('findGameBtns').style.display = 'none';
+        socket.emit('find_game', { username, mode });
+    }
 
     socket.on('waiting', data => {
         dbg('in waiting room', 'info');
@@ -1546,7 +1602,17 @@
         board     = Array(9).fill(null);
         moveOrder = [];
 
-        document.getElementById('findGameBtn').style.display = 'none';
+        gameMode = data.mode || 'ranked';
+        document.getElementById('findGameBtns').style.display = 'none';
+        // Show mode badge
+        const badge = document.getElementById('modeBadge');
+        if (gameMode === 'casual') {
+            badge.textContent = '☁ Casual';
+            badge.style.cssText += ';background:rgba(77,201,255,0.12);border:1px solid #4dc9ff;color:#4dc9ff;display:inline-block;';
+        } else {
+            badge.textContent = '⚔ Ranked';
+            badge.style.cssText += ';background:rgba(255,77,109,0.12);border:1px solid #ff4d6d;color:#ff4d6d;display:inline-block;';
+        }
         document.getElementById('playersBar').classList.add('show');
         document.getElementById('matchBar').classList.add('show');
         document.getElementById('timerBar').classList.add('show');
@@ -1687,6 +1753,42 @@
     // ═══════════════════════════════════════════════════════
     //  SOCKET: MOVE MADE
     // ═══════════════════════════════════════════════════════
+    function applyShieldEvent(event) {
+        if (!event) return;
+        if (event === 'blocked') {
+            showToast('🛡 Shield absorbed the loss!', '#4dc9ff');
+            dbg('demotion shield blocked a loss', 'ok');
+        } else if (event === 'broken') {
+            showToast('💔 Shield broken — deranked!', '#ff4d6d');
+            dbg('demotion shield broken — deranked', 'err');
+        } else if (event === 'restored') {
+            showToast('🛡 Shield charge restored!', '#4dff91');
+            dbg('demotion shield charge restored', 'ok');
+        }
+    }
+
+    function showToast(msg, color) {
+        let toast = document.getElementById('shieldToast');
+        if (!toast) {
+            toast = document.createElement('div');
+            toast.id = 'shieldToast';
+            toast.style.cssText = [
+                'position:fixed','bottom:32px','left:50%','transform:translateX(-50%)',
+                'padding:10px 24px','border-radius:8px','font-size:13px','letter-spacing:1px',
+                'font-family:DM Mono,monospace','z-index:9000',
+                'transition:opacity 0.4s','pointer-events:none'
+            ].join(';');
+            document.body.appendChild(toast);
+        }
+        toast.textContent = msg;
+        toast.style.background = color + '22';
+        toast.style.border = '1px solid ' + color;
+        toast.style.color = color;
+        toast.style.opacity = '1';
+        clearTimeout(toast._timer);
+        toast._timer = setTimeout(() => { toast.style.opacity = '0'; }, 2800);
+    }
+
     socket.on('move_made', data => {
         const { index, mark, game_over, winner, win_line, stats, timeout } = data;
         dbg(`move_made: mark=${mark} idx=${index} game_over=${game_over} winner=${winner} timeout=${timeout}`, 'evt');
@@ -1700,7 +1802,13 @@
             isMyTurn = false;
             stopTimer();
 
-            if (stats) { userStats = stats; updateStatsDisplay(); }
+            if (stats) {
+                const shieldEvent = stats.shield_event;
+                userStats = stats;
+                userStats.demotion_shield = stats.demotion_shield ?? 3;
+                updateStatsDisplay();
+                applyShieldEvent(shieldEvent);
+            }
 
             if (winner && winner !== 'draw') {
                 matchScore[winner]++;
@@ -1880,6 +1988,15 @@
         board     = Array(9).fill(null);
         moveOrder = [];
 
+        gameMode = data.mode || gameMode;
+        const badge2 = document.getElementById('modeBadge');
+        if (gameMode === 'casual') {
+            badge2.textContent = '☁ Casual';
+            badge2.style.cssText += ';background:rgba(77,201,255,0.12);border:1px solid #4dc9ff;color:#4dc9ff;display:inline-block;';
+        } else {
+            badge2.textContent = '⚔ Ranked';
+            badge2.style.cssText += ';background:rgba(255,77,109,0.12);border:1px solid #ff4d6d;color:#ff4d6d;display:inline-block;';
+        }
         document.getElementById('xPlayer').textContent = data.x_player;
         document.getElementById('oPlayer').textContent = data.o_player;
         document.getElementById('endOverlay').classList.remove('show');
@@ -1911,7 +2028,8 @@
     function fullReset() {
         dbg('fullReset()', 'warn');
         stopTimer();
-        document.getElementById('findGameBtn').style.display = 'block';
+        document.getElementById('findGameBtns').style.display = 'flex';
+        document.getElementById('modeBadge').style.display = 'none';
         document.getElementById('gameLayout').classList.remove('show');
         document.getElementById('playersBar').classList.remove('show');
         document.getElementById('matchBar').classList.remove('show');
