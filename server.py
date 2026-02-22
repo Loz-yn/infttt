@@ -154,6 +154,46 @@ def init_db():
                     ) THEN
                         ALTER TABLE users ADD COLUMN icon TEXT DEFAULT 'icon1.png';
                     END IF;
+
+                    -- Add coins: in-game currency earned by playing
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns 
+                        WHERE table_name = 'users' AND column_name = 'coins'
+                    ) THEN
+                        ALTER TABLE users ADD COLUMN coins INTEGER DEFAULT 0;
+                    END IF;
+
+                    -- Add owned_cross: comma-separated owned cross skins
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns 
+                        WHERE table_name = 'users' AND column_name = 'owned_cross'
+                    ) THEN
+                        ALTER TABLE users ADD COLUMN owned_cross TEXT DEFAULT 'default';
+                    END IF;
+
+                    -- Add owned_circle: comma-separated owned circle skins
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns 
+                        WHERE table_name = 'users' AND column_name = 'owned_circle'
+                    ) THEN
+                        ALTER TABLE users ADD COLUMN owned_circle TEXT DEFAULT 'default';
+                    END IF;
+
+                    -- Add equipped_cross: currently equipped cross skin
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns 
+                        WHERE table_name = 'users' AND column_name = 'equipped_cross'
+                    ) THEN
+                        ALTER TABLE users ADD COLUMN equipped_cross TEXT DEFAULT 'default';
+                    END IF;
+
+                    -- Add equipped_circle: currently equipped circle skin
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns 
+                        WHERE table_name = 'users' AND column_name = 'equipped_circle'
+                    ) THEN
+                        ALTER TABLE users ADD COLUMN equipped_circle TEXT DEFAULT 'default';
+                    END IF;
                 END $$;
             ''')
         conn.commit()
