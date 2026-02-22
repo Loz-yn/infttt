@@ -369,6 +369,11 @@
         .cell .piece {
             transition: opacity 0.4s, transform 0.3s;
             line-height: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            height: 100%;
         }
 
         /* Fading piece - will disappear next turn */
@@ -1591,7 +1596,7 @@
     // ═══════════════════════════════════════════════════════
     //  DEBUG CONSOLE
     // ═══════════════════════════════════════════════════════
-    const VERSION = 'v2.28/Alpha - Custom';
+    const VERSION = 'v2.30/Alpha - Skins';
     document.querySelector('.version-tag').textContent = VERSION;
 
     // ═══════════════════════════════════════════════════════
@@ -2152,7 +2157,7 @@
         const img = document.createElement('img');
         img.src = getSkinSrc(mark, pieceType);
         img.alt = mark;
-        img.style.cssText = 'width:65%;height:65%;object-fit:contain;display:block;';
+        img.style.cssText = 'width:65%;height:65%;object-fit:contain;display:block;margin:auto;';
         img.onerror = () => { img.remove(); span.textContent = mark; };
         span.appendChild(img);
         cell.innerHTML = '';
