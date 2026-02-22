@@ -1184,6 +1184,20 @@
             min-height: 18px;
             letter-spacing: 1px;
         }
+
+        .skin-action-row {
+            display: flex;
+            gap: 5px;
+        }
+
+        .skin-action-row .skin-action {
+            flex: 1;
+            font-size: 10px;
+            padding: 7px 4px;
+        }
+
+        .skin-card.super-card { border-color: rgba(212,168,67,0.3); }
+        .skin-card.super-card:hover { border-color: var(--accent); }
         /* ── RANK LADDER MODAL ── */
         #rankModal {
             display: none;
@@ -1563,6 +1577,7 @@
                 <div class="shop-tabs">
                     <button class="shop-tab active" id="tabCross" onclick="switchShopTab('cross')">✕ Cross</button>
                     <button class="shop-tab" id="tabCircle" onclick="switchShopTab('circle')">○ Circle</button>
+                    <button class="shop-tab" id="tabSuper" onclick="switchShopTab('super')">★ Super</button>
                 </div>
             </div>
             <div class="shop-body">
@@ -1596,7 +1611,7 @@
     // ═══════════════════════════════════════════════════════
     //  DEBUG CONSOLE
     // ═══════════════════════════════════════════════════════
-    const VERSION = 'v3.10/Alpha - Some Fixes';
+    const VERSION = 'v3.2/Alpha - Super Skins';
     document.querySelector('.version-tag').textContent = VERSION;
 
     // ═══════════════════════════════════════════════════════
@@ -2144,6 +2159,10 @@
     function getSkinSrc(mark, pieceType) {
         const key = mark.toLowerCase() + '_' + pieceType;
         const skin = gameSkins[key] || 'default';
+        // Server prefixes super skins with 'super/' so we detect and route correctly
+        if (skin.startsWith('super/')) {
+            return `/static/piece/${skin}.png`;
+        }
         return `/static/piece/${pieceType}/${skin}.png`;
     }
 
@@ -2688,6 +2707,7 @@
         shopCurrentTab = tab;
         document.getElementById('tabCross').classList.toggle('active', tab === 'cross');
         document.getElementById('tabCircle').classList.toggle('active', tab === 'circle');
+        document.getElementById('tabSuper').classList.toggle('active', tab === 'super');
         if (shopData) renderShopGrid(shopData);
     }
 
@@ -2704,20 +2724,37 @@
     function renderShopGrid(data) {
         const grid = document.getElementById('skinGrid');
         grid.innerHTML = '';
-        const skins    = shopCurrentTab === 'cross' ? data.cross_skins  : data.circle_skins;
+        const isSuper = shopCurrentTab === 'super';
+        const skins    = isSuper ? (data.super_skins || []) : shopCurrentTab === 'cross' ? data.cross_skins : data.circle_skins;
         const equipped = shopCurrentTab === 'cross' ? data.equipped_cross : data.equipped_circle;
-        const pieceType  = shopCurrentTab;
-        const markClass  = shopCurrentTab === 'cross' ? 'x' : 'o';
-        const markLetter = shopCurrentTab === 'cross' ? 'X' : 'O';
+        const pieceType  = isSuper ? 'cross' : shopCurrentTab;  // preview as cross for super
+        const markClass  = 'x';  // always show as X for super preview
+        const markLetter = isSuper ? '★' : shopCurrentTab === 'cross' ? 'X' : 'O';
+
+        if (isSuper && (!data.super_skins || data.super_skins.length === 0)) {
+            grid.innerHTML = '<div style="color:var(--muted);font-size:12px;letter-spacing:1px;padding:20px;text-align:center;">No super skins available yet.</div>';
+            return;
+        }
 
         skins.forEach(skin => {
-            const card = document.createElement('div');
-            card.className = 'skin-card' + (skin.id === equipped ? ' equipped' : '');
+            const equippedX = skin.id === data.equipped_cross;
+            const equippedO = skin.id === data.equipped_circle;
+            const isEquipped = isSuper ? (equippedX || equippedO) : (skin.id === equipped);
 
+            const card = document.createElement('div');
+            card.className = 'skin-card' + (isSuper ? ' super-card' : '') + (isEquipped ? ' equipped' : '');
+
+            // Preview — for super show both X and O side by side
             const preview = document.createElement('div');
             preview.className = 'skin-preview';
+            if (isSuper) {
+                preview.style.flexDirection = 'column';
+                preview.style.gap = '4px';
+            }
             const img = document.createElement('img');
-            img.src = `/static/piece/${pieceType}/${skin.file}.png`;
+            img.src = isSuper
+                ? `/static/piece/super/${skin.file}.png`
+                : `/static/piece/${shopCurrentTab}/${skin.file}.png`;
             img.alt = skin.name;
             img.onerror = () => {
                 img.remove();
@@ -2736,21 +2773,40 @@
             nameEl.textContent = skin.name;
             info.appendChild(nameEl);
 
-            const btn = document.createElement('button');
-            if (skin.id === equipped) {
-                btn.className = 'skin-action equipped-tag';
-                btn.textContent = 'Equipped';
-            } else if (skin.owned) {
-                btn.className = 'skin-action equip';
-                btn.textContent = 'Equip';
-                btn.onclick = () => equipSkin(pieceType, skin.id);
-            } else {
+            if (!skin.owned) {
+                // Not owned — single buy button
+                const btn = document.createElement('button');
                 btn.className = 'skin-action buy';
                 btn.textContent = `⬡ ${skin.price}`;
                 btn.disabled = myCoins < skin.price;
-                btn.onclick = () => buySkin(pieceType, skin.id);
+                btn.onclick = () => buySkin(isSuper ? 'super' : shopCurrentTab, skin.id);
+                info.appendChild(btn);
+            } else if (isSuper) {
+                // Super skin owned — two equip buttons
+                const row = document.createElement('div');
+                row.className = 'skin-action-row';
+
+                const btnX = document.createElement('button');
+                btnX.className = 'skin-action' + (equippedX ? ' equipped-tag' : ' equip');
+                btnX.textContent = equippedX ? '✕ On' : 'Equip ✕';
+                if (!equippedX) btnX.onclick = () => equipSkin('cross', skin.id);
+
+                const btnO = document.createElement('button');
+                btnO.className = 'skin-action' + (equippedO ? ' equipped-tag' : ' equip');
+                btnO.textContent = equippedO ? '○ On' : 'Equip ○';
+                if (!equippedO) btnO.onclick = () => equipSkin('circle', skin.id);
+
+                row.appendChild(btnX);
+                row.appendChild(btnO);
+                info.appendChild(row);
+            } else {
+                // Regular skin owned — single equip/equipped button
+                const btn = document.createElement('button');
+                btn.className = 'skin-action' + (isEquipped ? ' equipped-tag' : ' equip');
+                btn.textContent = isEquipped ? 'Equipped' : 'Equip';
+                if (!isEquipped) btn.onclick = () => equipSkin(shopCurrentTab, skin.id);
+                info.appendChild(btn);
             }
-            info.appendChild(btn);
 
             card.appendChild(preview);
             card.appendChild(info);
@@ -2772,11 +2828,15 @@
         myCoins = data.coins;
         myOwnedCross  = new Set(data.owned_cross.split(','));
         myOwnedCircle = new Set(data.owned_circle.split(','));
-        // Update shop data locally — no server round-trip needed
         if (shopData) {
             shopData.coins = data.coins;
             shopData.cross_skins.forEach(s  => { s.owned = myOwnedCross.has(s.id);  });
             shopData.circle_skins.forEach(s => { s.owned = myOwnedCircle.has(s.id); });
+            if (shopData.super_skins) {
+                shopData.super_skins.forEach(s => {
+                    s.owned = myOwnedCross.has(s.id) || myOwnedCircle.has(s.id);
+                });
+            }
         }
         document.getElementById('shopCoinsDisplay').textContent = `⬡ ${data.coins} coins`;
         document.getElementById('userCoins').textContent = `⬡ ${data.coins}`;

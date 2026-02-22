@@ -1053,10 +1053,31 @@ CIRCLE_SKINS = {
     '007': {'name': 'Black Pawn',       'file': 'black_pawn',       'price': 300},
 }
 
+SUPER_SKINS = {
+    '101': {'name': 'Runes', 'file': 'runes', 'price': 4500},
+    '102': {'name': 'The Mage', 'file': 'the_mage', 'price': 600},
+    '103': {'name': 'Scroll of Power', 'file': 'scroll_of_power', 'price': 6000},
+    '104': {'name': 'Flame Sword', 'file': 'flame_sword', 'price': 5000},
+    '105': {'name': 'Magical Sword', 'file': 'magical_sword', 'price': 5000},
+    '106': {'name': 'Poison Sword', 'file': 'poison_sword', 'price': 5000},
+    '107': {'name': 'Pixel Flames', 'file': 'pixel_flames', 'price': 5500},
+    '108': {'name': 'Rune of Strength', 'file': 'rune_of_strength', 'price': 8000},
+    '109': {'name': 'Rune of Health', 'file': 'rune_of_health', 'price': 8000},
+    '110': {'name': 'Rune of Speed', 'file': 'rune_of_speed', 'price': 8000},
+    '111': {'name': 'Rune of Magic', 'file': 'rune_of_magic', 'price': 8000},
+
+}
+
 def get_skin_file(skin_type, skin_id):
+    # Check type-specific catalogue first, then super skins
     catalogue = CROSS_SKINS if skin_type == 'cross' else CIRCLE_SKINS
     skin = catalogue.get(skin_id)
-    return skin['file'] if skin else 'default'
+    if skin:
+        return skin['file']
+    skin = SUPER_SKINS.get(skin_id)
+    if skin:
+        return 'super/' + skin['file']   # prefix so client builds correct path
+    return 'default'
 
 
 @socketio.on('get_shop')
@@ -1068,10 +1089,12 @@ def handle_get_shop():
     user = get_user(username)
     owned_cross  = set(user.get('owned_cross',  '001').split(','))
     owned_circle = set(user.get('owned_circle', '001').split(','))
+    owned_super = owned_cross | owned_circle  # super skins stored in both if owned
     emit('shop_data', {
         'coins': user.get('coins', 0),
         'cross_skins':  [{'id': k, 'name': v['name'], 'file': v['file'], 'price': v['price'], 'owned': k in owned_cross}  for k, v in CROSS_SKINS.items()],
         'circle_skins': [{'id': k, 'name': v['name'], 'file': v['file'], 'price': v['price'], 'owned': k in owned_circle} for k, v in CIRCLE_SKINS.items()],
+        'super_skins':  [{'id': k, 'name': v['name'], 'file': v['file'], 'price': v['price'], 'owned': k in owned_super}  for k, v in SUPER_SKINS.items()],
         'equipped_cross':  user.get('equipped_cross', '001'),
         'equipped_circle': user.get('equipped_circle', '001'),
     })
@@ -1087,17 +1110,28 @@ def handle_buy_skin(data):
     skin_type = data.get('skin_type', '')
     print(f"[buy_skin] skin_name={skin_name!r} skin_type={skin_type!r} catalogue_keys={list((CROSS_SKINS if skin_type=='cross' else CIRCLE_SKINS).keys()) if skin_type in ('cross','circle') else 'N/A'}", flush=True)
 
-    catalogue = CROSS_SKINS if skin_type == 'cross' else CIRCLE_SKINS if skin_type == 'circle' else None
+    is_super = skin_name in SUPER_SKINS
+    if is_super:
+        catalogue = SUPER_SKINS
+        skin_type = 'super'
+    elif skin_type == 'cross':
+        catalogue = CROSS_SKINS
+    elif skin_type == 'circle':
+        catalogue = CIRCLE_SKINS
+    else:
+        catalogue = None
+
     if catalogue is None or skin_name not in catalogue:
         emit('shop_error', {'message': 'Invalid skin'})
         return
 
     price = catalogue[skin_name]['price']
     user = get_user(username)
-    owned_key = f'owned_{skin_type}'
-    owned = set(user.get(owned_key, '001').split(','))
+    owned_cross_set  = set(user.get('owned_cross',  '001').split(','))
+    owned_circle_set = set(user.get('owned_circle', '001').split(','))
 
-    if skin_name in owned:
+    already_owned = (skin_name in owned_cross_set) if not is_super else (skin_name in owned_cross_set and skin_name in owned_circle_set)
+    if already_owned:
         emit('shop_error', {'message': 'Already owned'})
         return
 
@@ -1105,14 +1139,28 @@ def handle_buy_skin(data):
         emit('shop_error', {'message': 'Not enough coins'})
         return
 
-    owned.add(skin_name)
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                f"UPDATE users SET coins = coins - %s, {owned_key} = %s WHERE username = %s",
-                (price, ','.join(owned), username)
-            )
-        conn.commit()
+    if is_super:
+        # Add to both owned lists
+        owned_cross_set.add(skin_name)
+        owned_circle_set.add(skin_name)
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE users SET coins = coins - %s, owned_cross = %s, owned_circle = %s WHERE username = %s",
+                    (price, ','.join(owned_cross_set), ','.join(owned_circle_set), username)
+                )
+            conn.commit()
+    else:
+        owned_key = f'owned_{skin_type}'
+        owned_set = owned_cross_set if skin_type == 'cross' else owned_circle_set
+        owned_set.add(skin_name)
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"UPDATE users SET coins = coins - %s, {owned_key} = %s WHERE username = %s",
+                    (price, ','.join(owned_set), username)
+                )
+            conn.commit()
 
     user = get_user(username)
     emit('buy_success', {
