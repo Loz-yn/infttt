@@ -1075,6 +1075,7 @@ def handle_buy_skin(data):
     username = active_sessions[player_id]
     skin_name = data.get('name', '')
     skin_type = data.get('skin_type', '')
+    print(f"[buy_skin] skin_name={skin_name!r} skin_type={skin_type!r} catalogue_keys={list((CROSS_SKINS if skin_type=='cross' else CIRCLE_SKINS).keys()) if skin_type in ('cross','circle') else 'N/A'}", flush=True)
 
     catalogue = CROSS_SKINS if skin_type == 'cross' else CIRCLE_SKINS if skin_type == 'circle' else None
     if catalogue is None or skin_name not in catalogue:
@@ -1107,8 +1108,8 @@ def handle_buy_skin(data):
     emit('buy_success', {
         'skin_type': skin_type, 'name': skin_name,
         'coins': user.get('coins', 0),
-        'owned_cross':  user.get('owned_cross', 'default'),
-        'owned_circle': user.get('owned_circle', 'default'),
+        'owned_cross':  user.get('owned_cross', '001'),
+        'owned_circle': user.get('owned_circle', '001'),
     })
 
 

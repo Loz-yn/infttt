@@ -1596,7 +1596,7 @@
     // ═══════════════════════════════════════════════════════
     //  DEBUG CONSOLE
     // ═══════════════════════════════════════════════════════
-    const VERSION = 'v2.30/Alpha - Skins';
+    const VERSION = 'v3.02/Alpha - Some Fixes';
     document.querySelector('.version-tag').textContent = VERSION;
 
     // ═══════════════════════════════════════════════════════
@@ -2712,12 +2712,12 @@
 
         skins.forEach(skin => {
             const card = document.createElement('div');
-            card.className = 'skin-card' + (skin.name === equipped ? ' equipped' : '');
+            card.className = 'skin-card' + (skin.id === equipped ? ' equipped' : '');
 
             const preview = document.createElement('div');
             preview.className = 'skin-preview';
             const img = document.createElement('img');
-            img.src = `/static/piece/${pieceType}/${skin.name}.png`;
+            img.src = `/static/piece/${pieceType}/${skin.file}.png`;
             img.alt = skin.name;
             img.onerror = () => {
                 img.remove();
@@ -2737,18 +2737,18 @@
             info.appendChild(nameEl);
 
             const btn = document.createElement('button');
-            if (skin.name === equipped) {
+            if (skin.id === equipped) {
                 btn.className = 'skin-action equipped-tag';
                 btn.textContent = 'Equipped';
             } else if (skin.owned) {
                 btn.className = 'skin-action equip';
                 btn.textContent = 'Equip';
-                btn.onclick = () => equipSkin(pieceType, skin.name);
+                btn.onclick = () => equipSkin(pieceType, skin.id);
             } else {
                 btn.className = 'skin-action buy';
                 btn.textContent = `⬡ ${skin.price}`;
                 btn.disabled = myCoins < skin.price;
-                btn.onclick = () => buySkin(pieceType, skin.name);
+                btn.onclick = () => buySkin(pieceType, skin.id);
             }
             info.appendChild(btn);
 
