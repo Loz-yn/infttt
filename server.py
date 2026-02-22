@@ -168,7 +168,7 @@ def init_db():
                         SELECT 1 FROM information_schema.columns 
                         WHERE table_name = 'users' AND column_name = 'owned_cross'
                     ) THEN
-                        ALTER TABLE users ADD COLUMN owned_cross TEXT DEFAULT 'default';
+                        ALTER TABLE users ADD COLUMN owned_cross TEXT DEFAULT '001';
                     END IF;
 
                     -- Add owned_circle: comma-separated owned circle skins
@@ -176,7 +176,7 @@ def init_db():
                         SELECT 1 FROM information_schema.columns 
                         WHERE table_name = 'users' AND column_name = 'owned_circle'
                     ) THEN
-                        ALTER TABLE users ADD COLUMN owned_circle TEXT DEFAULT 'default';
+                        ALTER TABLE users ADD COLUMN owned_circle TEXT DEFAULT '001';
                     END IF;
 
                     -- Add equipped_cross: currently equipped cross skin
@@ -184,7 +184,7 @@ def init_db():
                         SELECT 1 FROM information_schema.columns 
                         WHERE table_name = 'users' AND column_name = 'equipped_cross'
                     ) THEN
-                        ALTER TABLE users ADD COLUMN equipped_cross TEXT DEFAULT 'default';
+                        ALTER TABLE users ADD COLUMN equipped_cross TEXT DEFAULT '001';
                     END IF;
 
                     -- Add equipped_circle: currently equipped circle skin
@@ -192,7 +192,7 @@ def init_db():
                         SELECT 1 FROM information_schema.columns 
                         WHERE table_name = 'users' AND column_name = 'equipped_circle'
                     ) THEN
-                        ALTER TABLE users ADD COLUMN equipped_circle TEXT DEFAULT 'default';
+                        ALTER TABLE users ADD COLUMN equipped_circle TEXT DEFAULT '001';
                     END IF;
                 END $$;
             ''')
@@ -590,11 +590,11 @@ def handle_find_game(data):
         my_icon  = player_icons.get(player_id, 'icon1.png')
         opp_user = get_user(opp_username)
         my_user  = get_user(username)
-        opp_cross  = opp_user.get('equipped_cross',  'default') if opp_user else 'default'
-        opp_circle = opp_user.get('equipped_circle', 'default') if opp_user else 'default'
-        my_cross   = my_user.get('equipped_cross',   'default') if my_user else 'default'
-        my_circle  = my_user.get('equipped_circle',  'default') if my_user else 'default'
-        # X = opp, O = me (from player_id's perspective)
+        opp_cross  = get_skin_file('cross',  opp_user.get('equipped_cross',  '001') if opp_user else '001')
+        opp_circle = get_skin_file('circle', opp_user.get('equipped_circle', '001') if opp_user else '001')
+        my_cross   = get_skin_file('cross',  my_user.get('equipped_cross',   '001') if my_user else '001')
+        my_circle  = get_skin_file('circle', my_user.get('equipped_circle',  '001') if my_user else '001')
+        # X = opp, O = me — send filenames so client loads the right image
         skins = {'x_cross': opp_cross, 'x_circle': opp_circle, 'o_cross': my_cross, 'o_circle': my_circle}
         emit('game_start', {'game_id': game_id, 'mark': 'X', 'first_turn': 'X', 'new_match': True,
                             'opponent_name': username, 'x_player': opp_username, 'o_player': username,
@@ -929,10 +929,10 @@ def handle_rematch(data):
         xu = get_user(game.x_username)
         ou = get_user(game.o_username)
         rskins = {
-            'x_cross':  xu.get('equipped_cross',  'default') if xu else 'default',
-            'x_circle': xu.get('equipped_circle', 'default') if xu else 'default',
-            'o_cross':  ou.get('equipped_cross',  'default') if ou else 'default',
-            'o_circle': ou.get('equipped_circle', 'default') if ou else 'default',
+            'x_cross':  get_skin_file('cross',  xu.get('equipped_cross',  '001') if xu else '001'),
+            'x_circle': get_skin_file('circle', xu.get('equipped_circle', '001') if xu else '001'),
+            'o_cross':  get_skin_file('cross',  ou.get('equipped_cross',  '001') if ou else '001'),
+            'o_circle': get_skin_file('circle', ou.get('equipped_circle', '001') if ou else '001'),
         }
         emit('rematch_start', {'game_id': new_game_id, 'mark': 'X', 'first_turn': first, 'new_match': new_match,
                                'opponent_name': game.o_username, 'x_player': game.x_username,
@@ -1014,9 +1014,32 @@ def handle_chat(data):
 
 # ── SHOP ─────────────────────────────────────────────────────────────────────
 
-# Catalogue: skin name -> price. Add new skins here as you create the images.
-CIRCLE_SKINS  = {'default': 0, 'Heart': 450, 'O-Suprise': 450, 'Void Egg': 450, 'Huh Cat': 740, 'The Great Dragon': 2400, 'Black Pawn': 300}   # 'default' is always free
-CROSS_SKINS = {'default': 0, 'Cupids Bow': 450, 'X-Suprise': 450, 'Flame Egg': 450, 'Wow Cat': 740, 'Dragon Slayer': 2400, 'White Pawn': 300}
+# Skin catalogues — id -> {name, file, price}
+# DB stores IDs ("001,003") not names — compact and rename-safe
+# 'file' maps to /static/piece/{type}/{file}.png
+CROSS_SKINS = {
+    '001': {'name': 'Default',       'file': 'default',       'price': 0},
+    '002': {'name': 'Cupids Bow',    'file': 'cupids_bow',    'price': 450},
+    '003': {'name': 'X-Surprise',    'file': 'x_surprise',    'price': 450},
+    '004': {'name': 'Flame Egg',     'file': 'flame_egg',     'price': 450},
+    '005': {'name': 'Wow Cat',       'file': 'wow_cat',       'price': 740},
+    '006': {'name': 'Dragon Slayer', 'file': 'dragon_slayer', 'price': 2400},
+    '007': {'name': 'White Pawn',    'file': 'white_pawn',    'price': 300},
+}
+CIRCLE_SKINS = {
+    '001': {'name': 'Default',          'file': 'default',          'price': 0},
+    '002': {'name': 'Heart',            'file': 'heart',            'price': 450},
+    '003': {'name': 'O-Surprise',       'file': 'o_surprise',       'price': 450},
+    '004': {'name': 'Void Egg',         'file': 'void_egg',         'price': 450},
+    '005': {'name': 'Huh Cat',          'file': 'huh_cat',          'price': 740},
+    '006': {'name': 'The Great Dragon', 'file': 'the_great_dragon', 'price': 2400},
+    '007': {'name': 'Black Pawn',       'file': 'black_pawn',       'price': 300},
+}
+
+def get_skin_file(skin_type, skin_id):
+    catalogue = CROSS_SKINS if skin_type == 'cross' else CIRCLE_SKINS
+    skin = catalogue.get(skin_id)
+    return skin['file'] if skin else 'default'
 
 
 @socketio.on('get_shop')
@@ -1026,14 +1049,14 @@ def handle_get_shop():
         return
     username = active_sessions[player_id]
     user = get_user(username)
-    owned_cross  = set(user.get('owned_cross',  'default').split(','))
-    owned_circle = set(user.get('owned_circle', 'default').split(','))
+    owned_cross  = set(user.get('owned_cross',  '001').split(','))
+    owned_circle = set(user.get('owned_circle', '001').split(','))
     emit('shop_data', {
         'coins': user.get('coins', 0),
-        'cross_skins':  [{'name': k, 'price': v, 'owned': k in owned_cross}  for k, v in CROSS_SKINS.items()],
-        'circle_skins': [{'name': k, 'price': v, 'owned': k in owned_circle} for k, v in CIRCLE_SKINS.items()],
-        'equipped_cross':  user.get('equipped_cross', 'default'),
-        'equipped_circle': user.get('equipped_circle', 'default'),
+        'cross_skins':  [{'id': k, 'name': v['name'], 'file': v['file'], 'price': v['price'], 'owned': k in owned_cross}  for k, v in CROSS_SKINS.items()],
+        'circle_skins': [{'id': k, 'name': v['name'], 'file': v['file'], 'price': v['price'], 'owned': k in owned_circle} for k, v in CIRCLE_SKINS.items()],
+        'equipped_cross':  user.get('equipped_cross', '001'),
+        'equipped_circle': user.get('equipped_circle', '001'),
     })
 
 
@@ -1051,10 +1074,10 @@ def handle_buy_skin(data):
         emit('shop_error', {'message': 'Invalid skin'})
         return
 
-    price = catalogue[skin_name]
+    price = catalogue[skin_name]['price']
     user = get_user(username)
     owned_key = f'owned_{skin_type}'
-    owned = set(user.get(owned_key, 'default').split(','))
+    owned = set(user.get(owned_key, '001').split(','))
 
     if skin_name in owned:
         emit('shop_error', {'message': 'Already owned'})
@@ -1096,7 +1119,7 @@ def handle_equip_skin(data):
 
     user = get_user(username)
     owned_key = f'owned_{skin_type}'
-    owned = set(user.get(owned_key, 'default').split(','))
+    owned = set(user.get(owned_key, '001').split(','))
 
     if skin_name not in owned:
         emit('shop_error', {'message': 'Skin not owned'})
