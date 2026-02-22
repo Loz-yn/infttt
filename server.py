@@ -1040,8 +1040,11 @@ CROSS_SKINS = {
     '003': {'name': 'X-Surprise',    'file': 'x_surprise',    'price': 450},
     '004': {'name': 'Flame Egg',     'file': 'flame_egg',     'price': 450},
     '005': {'name': 'Wow Cat',       'file': 'wow_cat',       'price': 740},
-    '006': {'name': 'Dragon Slayer', 'file': 'dragon_slayer', 'price': 2400},
+    '006': {'name': 'Dragon Slayer', 'file': 'dragon_slayer', 'price': 1400},
     '007': {'name': 'White Pawn',    'file': 'white_pawn',    'price': 300},
+    '008': {'name': 'Icestone',    'file': 'icestone',    'price': 700},
+    '009': {'name': 'Sentinel of Ice', 'file': 'sentinel_of_ice', 'price': 700},
+    '010': {'name': 'Oceanic Nova', 'file': 'oceanic_nova', 'price': 700},
 }
 CIRCLE_SKINS = {
     '001': {'name': 'Default',          'file': 'default',          'price': 0},
@@ -1049,13 +1052,16 @@ CIRCLE_SKINS = {
     '003': {'name': 'O-Surprise',       'file': 'o_surprise',       'price': 450},
     '004': {'name': 'Void Egg',         'file': 'void_egg',         'price': 450},
     '005': {'name': 'Huh Cat',          'file': 'huh_cat',          'price': 740},
-    '006': {'name': 'The Great Dragon', 'file': 'the_great_dragon', 'price': 2400},
+    '006': {'name': 'The Great Dragon', 'file': 'the_great_dragon', 'price': 1400},
     '007': {'name': 'Black Pawn',       'file': 'black_pawn',       'price': 300},
+    '008': {'name': 'Flamestone',       'file': 'flamestone',       'price': 700},
+    '009': {'name': 'Sentinel of Fire', 'file': 'sentinel_of_fire', 'price': 700},
+    '010': {'name': 'Infernal Nova',    'file': 'infernal_nova',    'price': 700},
 }
 
 SUPER_SKINS = {
     '101': {'name': 'Runes', 'file': 'runes', 'price': 4500},
-    '102': {'name': 'The Mage', 'file': 'the_mage', 'price': 600},
+    '102': {'name': 'The Mage', 'file': 'the_mage', 'price': 6000},
     '103': {'name': 'Scroll of Power', 'file': 'scroll_of_power', 'price': 6000},
     '104': {'name': 'Flame Sword', 'file': 'flame_sword', 'price': 5000},
     '105': {'name': 'Magical Sword', 'file': 'magical_sword', 'price': 5000},
