@@ -976,7 +976,7 @@ def handle_chat(data):
 
 # Catalogue: skin name -> price. Add new skins here as you create the images.
 CIRCLE_SKINS  = {'default': 0, 'Heart': 450, 'O-Suprise': 450, 'Void Egg': 450, 'Huh Cat': 740, 'The Great Dragon': 2400, 'Black Pawn': 300}   # 'default' is always free
-CROSS_SKINS = {'default': 0, 'Cupids Bow': 450, 'X-Suprise': 450, 'Flame Egg': 450, 'Wow Cat': 740, 'Dragon Slayer': 2400, 'White Pawn': 300
+CROSS_SKINS = {'default': 0, 'Cupids Bow': 450, 'X-Suprise': 450, 'Flame Egg': 450, 'Wow Cat': 740, 'Dragon Slayer': 2400, 'White Pawn': 300}
 
 
 @socketio.on('get_shop')
