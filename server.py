@@ -548,12 +548,20 @@ def handle_find_game(data):
 
         opp_icon = player_icons.get(opp_id, 'icon1.png')
         my_icon  = player_icons.get(player_id, 'icon1.png')
+        opp_user = get_user(opp_username)
+        my_user  = get_user(username)
+        opp_cross  = opp_user.get('equipped_cross',  'default') if opp_user else 'default'
+        opp_circle = opp_user.get('equipped_circle', 'default') if opp_user else 'default'
+        my_cross   = my_user.get('equipped_cross',   'default') if my_user else 'default'
+        my_circle  = my_user.get('equipped_circle',  'default') if my_user else 'default'
+        # X = opp, O = me (from player_id's perspective)
+        skins = {'x_cross': opp_cross, 'x_circle': opp_circle, 'o_cross': my_cross, 'o_circle': my_circle}
         emit('game_start', {'game_id': game_id, 'mark': 'X', 'first_turn': 'X', 'new_match': True,
                             'opponent_name': username, 'x_player': opp_username, 'o_player': username,
-                            'x_icon': opp_icon, 'o_icon': my_icon}, room=opp_id)
+                            'x_icon': opp_icon, 'o_icon': my_icon, **skins}, room=opp_id)
         emit('game_start', {'game_id': game_id, 'mark': 'O', 'first_turn': 'X', 'new_match': True,
                             'opponent_name': opp_username, 'x_player': opp_username, 'o_player': username,
-                            'x_icon': opp_icon, 'o_icon': my_icon}, room=player_id)
+                            'x_icon': opp_icon, 'o_icon': my_icon, **skins}, room=player_id)
         # Start server-side turn timer — X goes first
         socketio.start_background_task(schedule_timeout, game_id, game.turn_token)
     else:
@@ -878,12 +886,20 @@ def handle_rematch(data):
 
         rx_icon = player_icons.get(game.x_player, 'icon1.png')
         ro_icon = player_icons.get(game.o_player, 'icon1.png')
+        xu = get_user(game.x_username)
+        ou = get_user(game.o_username)
+        rskins = {
+            'x_cross':  xu.get('equipped_cross',  'default') if xu else 'default',
+            'x_circle': xu.get('equipped_circle', 'default') if xu else 'default',
+            'o_cross':  ou.get('equipped_cross',  'default') if ou else 'default',
+            'o_circle': ou.get('equipped_circle', 'default') if ou else 'default',
+        }
         emit('rematch_start', {'game_id': new_game_id, 'mark': 'X', 'first_turn': first, 'new_match': new_match,
                                'opponent_name': game.o_username, 'x_player': game.x_username,
-                               'o_player': game.o_username, 'x_icon': rx_icon, 'o_icon': ro_icon}, room=game.x_player)
+                               'o_player': game.o_username, 'x_icon': rx_icon, 'o_icon': ro_icon, **rskins}, room=game.x_player)
         emit('rematch_start', {'game_id': new_game_id, 'mark': 'O', 'first_turn': first, 'new_match': new_match,
                                'opponent_name': game.x_username, 'x_player': game.x_username,
-                               'o_player': game.o_username, 'x_icon': rx_icon, 'o_icon': ro_icon}, room=game.o_player)
+                               'o_player': game.o_username, 'x_icon': rx_icon, 'o_icon': ro_icon, **rskins}, room=game.o_player)
 
         del games[game_id]
         # Start server-side turn timer for the rematch
@@ -954,6 +970,107 @@ def handle_chat(data):
         return
 
     emit('chat_message', {'sender': sender, 'message': message}, room=game_id, skip_sid=request.sid)
+
+
+# ── SHOP ─────────────────────────────────────────────────────────────────────
+
+# Catalogue: skin name -> price. Add new skins here as you create the images.
+CIRCLE_SKINS  = {'default': 0, 'Heart': 450, 'O-Suprise': 450, 'Void Egg': 450, 'Huh Cat': 740, 'The Great Dragon': 2400, 'Black Pawn': 300}   # 'default' is always free
+CROSS_SKINS = {'default': 0, 'Cupids Bow': 450, 'X-Suprise': 450, 'Flame Egg': 450, 'Wow Cat': 740, 'Dragon Slayer': 2400, 'White Pawn': 300
+
+
+@socketio.on('get_shop')
+def handle_get_shop():
+    player_id = request.sid
+    if player_id not in active_sessions:
+        return
+    username = active_sessions[player_id]
+    user = get_user(username)
+    owned_cross  = set(user.get('owned_cross',  'default').split(','))
+    owned_circle = set(user.get('owned_circle', 'default').split(','))
+    emit('shop_data', {
+        'coins': user.get('coins', 0),
+        'cross_skins':  [{'name': k, 'price': v, 'owned': k in owned_cross}  for k, v in CROSS_SKINS.items()],
+        'circle_skins': [{'name': k, 'price': v, 'owned': k in owned_circle} for k, v in CIRCLE_SKINS.items()],
+        'equipped_cross':  user.get('equipped_cross', 'default'),
+        'equipped_circle': user.get('equipped_circle', 'default'),
+    })
+
+
+@socketio.on('buy_skin')
+def handle_buy_skin(data):
+    player_id = request.sid
+    if player_id not in active_sessions:
+        return
+    username = active_sessions[player_id]
+    skin_name = data.get('name', '')
+    skin_type = data.get('skin_type', '')
+
+    catalogue = CROSS_SKINS if skin_type == 'cross' else CIRCLE_SKINS if skin_type == 'circle' else None
+    if catalogue is None or skin_name not in catalogue:
+        emit('shop_error', {'message': 'Invalid skin'})
+        return
+
+    price = catalogue[skin_name]
+    user = get_user(username)
+    owned_key = f'owned_{skin_type}'
+    owned = set(user.get(owned_key, 'default').split(','))
+
+    if skin_name in owned:
+        emit('shop_error', {'message': 'Already owned'})
+        return
+
+    if user.get('coins', 0) < price:
+        emit('shop_error', {'message': 'Not enough coins'})
+        return
+
+    owned.add(skin_name)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"UPDATE users SET coins = coins - %s, {owned_key} = %s WHERE username = %s",
+                (price, ','.join(owned), username)
+            )
+        conn.commit()
+
+    user = get_user(username)
+    emit('buy_success', {
+        'skin_type': skin_type, 'name': skin_name,
+        'coins': user.get('coins', 0),
+        'owned_cross':  user.get('owned_cross', 'default'),
+        'owned_circle': user.get('owned_circle', 'default'),
+    })
+
+
+@socketio.on('equip_skin')
+def handle_equip_skin(data):
+    player_id = request.sid
+    if player_id not in active_sessions:
+        return
+    username = active_sessions[player_id]
+    skin_name = data.get('name', '')
+    skin_type = data.get('skin_type', '')
+
+    if skin_type not in ('cross', 'circle'):
+        return
+
+    user = get_user(username)
+    owned_key = f'owned_{skin_type}'
+    owned = set(user.get(owned_key, 'default').split(','))
+
+    if skin_name not in owned:
+        emit('shop_error', {'message': 'Skin not owned'})
+        return
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"UPDATE users SET equipped_{skin_type} = %s WHERE username = %s",
+                (skin_name, username)
+            )
+        conn.commit()
+
+    emit('equip_success', {'skin_type': skin_type, 'name': skin_name})
 
 
 @socketio.on('get_leaderboard')
