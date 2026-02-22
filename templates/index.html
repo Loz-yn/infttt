@@ -6,17 +6,34 @@
     <title>Infinite Tic-Tac-Toe</title>
     <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
+        /* ── DARK THEME (default) ── */
         :root {
-            --bg: #0a0a0f;
-            --surface: #12121a;
-            --border: #1e1e2e;
-            --x-color: #ff4d6d;
-            --o-color: #4dc9ff;
-            --x-glow: rgba(255, 77, 109, 0.4);
-            --o-glow: rgba(77, 201, 255, 0.4);
-            --text: #e8e8f0;
-            --muted: #5a5a7a;
-            --accent: #f0c060;
+            --bg: #111111;
+            --surface: #1a1a1a;
+            --border: #2a2a2a;
+            --x-color: #c0392b;
+            --o-color: #2980b9;
+            --x-glow: rgba(192, 57, 43, 0.25);
+            --o-glow: rgba(41, 128, 185, 0.25);
+            --text: #e8e8e8;
+            --muted: #666666;
+            --accent: #d4a843;
+            --input-bg: #111111;
+        }
+
+        /* ── LIGHT THEME ── */
+        html.light {
+            --bg: #f5f5f5;
+            --surface: #ffffff;
+            --border: #e0e0e0;
+            --x-color: #c0392b;
+            --o-color: #2980b9;
+            --x-glow: rgba(192, 57, 43, 0.15);
+            --o-glow: rgba(41, 128, 185, 0.15);
+            --text: #1a1a1a;
+            --muted: #999999;
+            --accent: #b8860b;
+            --input-bg: #f5f5f5;
         }
 
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -30,8 +47,7 @@
             justify-content: center;
             align-items: flex-start;
             padding: 24px 16px;
-            background-image: radial-gradient(ellipse at 20% 20%, rgba(255,77,109,0.05) 0%, transparent 50%),
-                              radial-gradient(ellipse at 80% 80%, rgba(77,201,255,0.05) 0%, transparent 50%);
+            transition: background 0.25s, color 0.25s;
         }
 
         .wrapper {
@@ -53,9 +69,7 @@
             font-family: 'Bebas Neue', sans-serif;
             font-size: 32px;
             letter-spacing: 3px;
-            background: linear-gradient(90deg, var(--x-color), var(--o-color));
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+            color: var(--text);
         }
 
         .version-tag {
@@ -65,9 +79,6 @@
             text-transform: uppercase;
             margin-left: 10px;
             vertical-align: middle;
-            -webkit-text-fill-color: var(--muted);
-            background: none;
-            -webkit-background-clip: unset;
         }
 
         .header-btns { display: flex; gap: 10px; }
@@ -85,7 +96,7 @@
             text-transform: uppercase;
             transition: all 0.2s;
         }
-        .btn:hover { border-color: var(--muted); background: #1a1a28; }
+        .btn:hover { border-color: var(--muted); background: var(--border); }
         .btn.primary {
             border-color: var(--accent);
             color: var(--accent);
@@ -160,7 +171,7 @@
             font-family: 'Bebas Neue', sans-serif;
             font-size: 20px;
             letter-spacing: 3px;
-            color: #0a0a0f;
+            color: #1a1a1a;
             cursor: pointer;
             transition: opacity 0.2s, transform 0.1s;
         }
@@ -251,10 +262,10 @@
             transition: all 0.3s;
         }
 
-        #status.waiting { color: var(--accent); border-color: rgba(240,192,96,0.3); }
+        #status.waiting { color: var(--accent); border-color: var(--border); }
         #status.playing { color: var(--muted); }
-        #status.your-turn { color: var(--x-color); border-color: rgba(255,77,109,0.3); background: rgba(255,77,109,0.05); }
-        #status.opp-turn  { color: var(--o-color); border-color: rgba(77,201,255,0.3);  background: rgba(77,201,255,0.05); }
+        #status.your-turn { color: var(--x-color); border-color: var(--border); }
+        #status.opp-turn  { color: var(--o-color); border-color: var(--border); }
 
         .find-btn {
             display: block;
@@ -311,8 +322,8 @@
             font-weight: bold;
         }
 
-        .piece-icon.x { background: rgba(255,77,109,0.15); color: var(--x-color); border: 1px solid rgba(255,77,109,0.3); }
-        .piece-icon.o { background: rgba(77,201,255,0.15); color: var(--o-color); border: 1px solid rgba(77,201,255,0.3); }
+        .piece-icon.x { background: rgba(192,57,43,0.1); color: var(--x-color); border: 1px solid rgba(192,57,43,0.2); }
+        .piece-icon.o { background: rgba(41,128,185,0.1); color: var(--o-color); border: 1px solid rgba(41,128,185,0.2); }
 
         .player-tag-name { font-size: 14px; }
         .player-tag-name.active { color: var(--accent); font-weight: 500; }
@@ -363,7 +374,7 @@
 
         .cell:hover:not(.taken) {
             border-color: var(--muted);
-            background: #16161f;
+            background: var(--border);
             transform: scale(1.02);
         }
 
@@ -395,8 +406,8 @@
         }
 
         /* Color per piece type */
-        .cell .piece.x { color: var(--x-color); text-shadow: 0 0 30px var(--x-glow); }
-        .cell .piece.o { color: var(--o-color); text-shadow: 0 0 30px var(--o-glow); }
+        .cell .piece.x { color: var(--x-color); }
+        .cell .piece.o { color: var(--o-color); }
 
         /* Win highlight */
         .cell.win-cell {
@@ -406,8 +417,8 @@
         }
 
         @keyframes winPulse {
-            from { box-shadow: 0 0 0 0 rgba(240,192,96,0.3); }
-            to   { box-shadow: 0 0 20px 4px rgba(240,192,96,0.15); }
+            from { box-shadow: 0 0 0 0 rgba(0,0,0,0); }
+            to   { box-shadow: 0 0 0 3px var(--accent); }
         }
 
         /* Drop-in animation */
@@ -471,7 +482,7 @@
 
         .chat-head {
             padding: 12px 16px;
-            background: #0f0f1a;
+            background: var(--surface);
             border-bottom: 1px solid var(--border);
             display: flex;
             justify-content: space-between;
@@ -488,7 +499,6 @@
             width: 6px; height: 6px;
             border-radius: 50%;
             background: var(--accent);
-            box-shadow: 0 0 6px var(--accent);
         }
 
         .unread-pill {
@@ -559,15 +569,15 @@
         }
 
         .msg.own .msg-bubble {
-            background: rgba(255,77,109,0.15);
-            border: 1px solid rgba(255,77,109,0.25);
+            background: rgba(192,57,43,0.1);
+            border: 1px solid rgba(192,57,43,0.2);
             color: var(--text);
             border-bottom-right-radius: 3px;
         }
 
         .msg.opp .msg-bubble {
-            background: rgba(77,201,255,0.1);
-            border: 1px solid rgba(77,201,255,0.2);
+            background: rgba(41,128,185,0.08);
+            border: 1px solid rgba(41,128,185,0.18);
             color: var(--text);
             border-bottom-left-radius: 3px;
         }
@@ -592,7 +602,7 @@
 
         #chatInput {
             flex: 1;
-            background: var(--bg);
+            background: var(--input-bg);
             border: 1px solid var(--border);
             border-radius: 8px;
             padding: 10px 13px;
@@ -892,6 +902,21 @@
             .chat-box { min-height: 320px; }
         }
 
+
+        /* ── THEME TOGGLE ── */
+        .theme-toggle {
+            background: none;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 7px 12px;
+            cursor: pointer;
+            color: var(--muted);
+            font-family: 'DM Mono', monospace;
+            font-size: 14px;
+            transition: color 0.2s, border-color 0.2s;
+            line-height: 1;
+        }
+        .theme-toggle:hover { color: var(--text); border-color: var(--muted); }
         /* ── DEBUG CONSOLE ── */
         #debugConsole {
             position: fixed;
@@ -1145,7 +1170,7 @@
             font-family: 'Bebas Neue', sans-serif;
             font-size: 18px;
             letter-spacing: 2px;
-            color: #0a0a0f;
+            color: #1a1a1a;
             cursor: pointer;
             transition: opacity 0.2s;
         }
@@ -1172,6 +1197,7 @@
     <header class="site-header">
         <div class="logo">∞ TTT<span class="version-tag">v1.6</span></div>
         <div class="header-btns" id="headerBtns" style="display:none">
+            <button class="theme-toggle" onclick="toggleTheme()" id="themeToggleBtn" title="Switch to light mode">☀</button>
             <button class="btn primary" onclick="showLeaderboard()">Leaderboard</button>
             <button class="btn" onclick="logout()">Logout</button>
         </div>
@@ -1383,7 +1409,7 @@
     // ═══════════════════════════════════════════════════════
     //  DEBUG CONSOLE
     // ═══════════════════════════════════════════════════════
-    const VERSION = 'v2.10/Alpha - Fixes';
+    const VERSION = 'v2.15/Alpha - Mono-chrome';
     document.querySelector('.version-tag').textContent = VERSION;
 
     // ═══════════════════════════════════════════════════════
@@ -1621,7 +1647,7 @@
         banner.innerHTML =
             '<div style="font-family:Bebas Neue,sans-serif;font-size:40px;letter-spacing:3px;color:#ff4d6d;">Session Ended</div>' +
             '<div style="font-size:14px;color:#5a5a7a;max-width:320px;text-align:center;">' + msg + '</div>' +
-            '<button onclick="location.reload()" style="margin-top:8px;padding:12px 32px;background:#f0c060;border:none;border-radius:8px;font-family:Bebas Neue,sans-serif;font-size:20px;letter-spacing:2px;color:#0a0a0f;cursor:pointer;">Back to Login</button>';
+            '<button onclick="location.reload()" style="margin-top:8px;padding:12px 32px;background:#f0c060;border:none;border-radius:8px;font-family:Bebas Neue,sans-serif;font-size:20px;letter-spacing:2px;color:#1a1a1a;cursor:pointer;">Back to Login</button>';
         document.body.appendChild(banner);
     });
 
@@ -2402,6 +2428,32 @@
     document.getElementById('iconPickerModal').addEventListener('click', e => {
         if (e.target === document.getElementById('iconPickerModal')) closeIconPicker();
     });
+
+
+    // ═══════════════════════════════════════════════════════
+    //  THEME TOGGLE
+    // ═══════════════════════════════════════════════════════
+    function applyTheme(theme) {
+        if (theme === 'light') {
+            document.documentElement.classList.add('light');
+            document.getElementById('themeToggleBtn').textContent = '☽';
+            document.getElementById('themeToggleBtn').title = 'Switch to dark mode';
+        } else {
+            document.documentElement.classList.remove('light');
+            document.getElementById('themeToggleBtn').textContent = '☀';
+            document.getElementById('themeToggleBtn').title = 'Switch to light mode';
+        }
+    }
+
+    function toggleTheme() {
+        const isLight = document.documentElement.classList.contains('light');
+        const next = isLight ? 'dark' : 'light';
+        localStorage.setItem('tttTheme', next);
+        applyTheme(next);
+    }
+
+    // Apply saved theme immediately on load
+    applyTheme(localStorage.getItem('tttTheme') || 'dark');
 
 </script>
 
