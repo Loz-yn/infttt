@@ -789,15 +789,25 @@ def _start_next_round(game_id):
     games[new_game_id] = new_game
 
     print(f"[next_round] new game turn={new_game.turn} emitting to X sid={game.x_player}", flush=True)
+    xu = get_user(game.x_username)
+    ou = get_user(game.o_username)
+    nr_skins = {
+        'x_cross':  get_skin_file('cross',  xu.get('equipped_cross',  '001') if xu else '001'),
+        'x_circle': get_skin_file('circle', xu.get('equipped_circle', '001') if xu else '001'),
+        'o_cross':  get_skin_file('cross',  ou.get('equipped_cross',  '001') if ou else '001'),
+        'o_circle': get_skin_file('circle', ou.get('equipped_circle', '001') if ou else '001'),
+    }
     socketio.emit('rematch_start', {
         'game_id': new_game_id, 'mark': 'X', 'first_turn': first, 'new_match': False,
-        'opponent_name': game.o_username, 'x_player': game.x_username, 'o_player': game.o_username
+        'opponent_name': game.o_username, 'x_player': game.x_username, 'o_player': game.o_username,
+        **nr_skins
     }, room=game.x_player, namespace='/')
 
     print(f"[next_round] emitting to O sid={game.o_player}", flush=True)
     socketio.emit('rematch_start', {
         'game_id': new_game_id, 'mark': 'O', 'first_turn': first, 'new_match': False,
-        'opponent_name': game.x_username, 'x_player': game.x_username, 'o_player': game.o_username
+        'opponent_name': game.x_username, 'x_player': game.x_username, 'o_player': game.o_username,
+        **nr_skins
     }, room=game.o_player, namespace='/')
 
     del games[game_id]

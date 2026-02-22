@@ -1596,7 +1596,7 @@
     // ═══════════════════════════════════════════════════════
     //  DEBUG CONSOLE
     // ═══════════════════════════════════════════════════════
-    const VERSION = 'v3.02/Alpha - Some Fixes';
+    const VERSION = 'v3.10/Alpha - Some Fixes';
     document.querySelector('.version-tag').textContent = VERSION;
 
     // ═══════════════════════════════════════════════════════
@@ -2772,13 +2772,26 @@
         myCoins = data.coins;
         myOwnedCross  = new Set(data.owned_cross.split(','));
         myOwnedCircle = new Set(data.owned_circle.split(','));
-        socket.emit('get_shop');
+        // Update shop data locally — no server round-trip needed
+        if (shopData) {
+            shopData.coins = data.coins;
+            shopData.cross_skins.forEach(s  => { s.owned = myOwnedCross.has(s.id);  });
+            shopData.circle_skins.forEach(s => { s.owned = myOwnedCircle.has(s.id); });
+        }
+        document.getElementById('shopCoinsDisplay').textContent = `⬡ ${data.coins} coins`;
+        document.getElementById('userCoins').textContent = `⬡ ${data.coins}`;
+        if (shopData) renderShopGrid(shopData);
     });
 
     socket.on('equip_success', data => {
-        if (data.skin_type === 'cross') myEquippedCross = data.name;
-        else myEquippedCircle = data.name;
-        socket.emit('get_shop');
+        if (data.skin_type === 'cross') {
+            myEquippedCross = data.name;
+            if (shopData) shopData.equipped_cross = data.name;
+        } else {
+            myEquippedCircle = data.name;
+            if (shopData) shopData.equipped_circle = data.name;
+        }
+        if (shopData) renderShopGrid(shopData);
     });
 
     socket.on('shop_error', data => {
