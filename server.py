@@ -194,6 +194,13 @@ def init_db():
                     ) THEN
                         ALTER TABLE users ADD COLUMN equipped_circle TEXT DEFAULT '001';
                     END IF;
+
+                    -- Backfill NULLs for any rows created before these columns existed
+                    UPDATE users SET coins         = 0     WHERE coins         IS NULL;
+                    UPDATE users SET owned_cross   = '001' WHERE owned_cross   IS NULL;
+                    UPDATE users SET owned_circle  = '001' WHERE owned_circle  IS NULL;
+                    UPDATE users SET equipped_cross  = '001' WHERE equipped_cross  IS NULL;
+                    UPDATE users SET equipped_circle = '001' WHERE equipped_circle IS NULL;
                 END $$;
             ''')
         conn.commit()
