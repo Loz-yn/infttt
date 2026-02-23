@@ -1466,7 +1466,7 @@
         </div>
 
         <!-- Status -->
-        <div id="status" class="waiting">Click Find Game to start</div>
+        <div id="status" class="waiting"></div>
 
         <!-- Find game button -->
         <button class="find-btn" id="findGameBtn">Find Game</button>
@@ -1611,7 +1611,7 @@
     // ═══════════════════════════════════════════════════════
     //  DEBUG CONSOLE
     // ═══════════════════════════════════════════════════════
-    const VERSION = 'v3.2/Alpha - Super Skins';
+    const VERSION = 'v3.25/Alpha - UI FIX';
     document.querySelector('.version-tag').textContent = VERSION;
 
     // ═══════════════════════════════════════════════════════
@@ -1955,6 +1955,9 @@
         moveOrder = [];
 
         document.getElementById('findGameBtn').style.display = 'none';
+        document.getElementById('headerBtns').querySelectorAll('.btn').forEach(b => b.style.display = 'none');
+        document.getElementById('userRankIcon').style.cursor = 'default';
+        document.getElementById('userRankIcon').title = '';
         document.getElementById('playersBar').classList.add('show');
         document.getElementById('matchBar').classList.add('show');
         document.getElementById('timerBar').classList.add('show');
@@ -2362,6 +2365,9 @@
         dbg('fullReset()', 'warn');
         stopTimer();
         document.getElementById('findGameBtn').style.display = 'block';
+        document.getElementById('headerBtns').querySelectorAll('.btn').forEach(b => b.style.display = '');
+        document.getElementById('userRankIcon').style.cursor = 'pointer';
+        document.getElementById('userRankIcon').title = 'Click to view all ranks';
         document.getElementById('gameLayout').classList.remove('show');
         document.getElementById('playersBar').classList.remove('show');
         document.getElementById('matchBar').classList.remove('show');
@@ -2573,6 +2579,7 @@
     ];
 
     function toggleRankModal() {
+        if (gameId) return;  // disabled during game
         const modal = document.getElementById('rankModal');
         const isOpen = modal.classList.toggle('show');
         if (isOpen) buildRankLadder();
