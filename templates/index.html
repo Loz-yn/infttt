@@ -1408,7 +1408,10 @@
                 <img id="userRankIcon" class="rank-icon" src="/static/ranks/bronze3.png" alt="Rank" title="Click to view all ranks" style="cursor:pointer;" onclick="toggleRankModal()">
                 <img id="userIconImg" src="/static/icons/icon1.png" alt="Profile Icon" title="Click to change icon" style="width:36px;height:36px;border-radius:8px;object-fit:cover;cursor:pointer;" onclick="openIconPicker()">
                 <div style="flex:1;">
-                    <div class="user-name-display" id="displayUsername"></div>
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <div class="user-name-display" id="displayUsername"></div>
+                        <span id="userLevelBadge" style="font-size:11px;color:var(--muted);letter-spacing:1px;">· Lv.1</span>
+                    </div>
                     <div class="user-stats-bar">
                         <span class="stat-w">W: <span id="userWins">0</span></span> ·
                         <span class="stat-l">L: <span id="userLosses">0</span></span> ·
@@ -1420,6 +1423,16 @@
                     <div id="mmrBarWrap" style="margin-top:6px;max-width:280px;">
                         <div style="position:relative;height:5px;background:var(--border);border-radius:99px;overflow:hidden;">
                             <div id="mmrBarFill" style="height:100%;border-radius:99px;background:#ffffff;transition:width 0.5s ease;"></div>
+                        </div>
+                    </div>
+                    <!-- XP progress bar -->
+                    <div id="xpBarWrap" style="margin-top:4px;max-width:280px;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">
+                            <span style="font-size:10px;color:var(--muted);letter-spacing:1px;">XP</span>
+                            <span id="xpLabel" style="font-size:10px;color:var(--muted);">0 / 100</span>
+                        </div>
+                        <div style="position:relative;height:4px;background:var(--border);border-radius:99px;overflow:hidden;">
+                            <div id="xpBarFill" style="height:100%;border-radius:99px;background:var(--accent);width:0%;transition:width 0.5s ease;"></div>
                         </div>
                     </div>
                 </div>
@@ -1611,7 +1624,7 @@
     // ═══════════════════════════════════════════════════════
     //  DEBUG CONSOLE
     // ═══════════════════════════════════════════════════════
-    const VERSION = 'v3.25/Alpha - UI FIX';
+    const VERSION = 'v3.37/Alpha - Level System';
     document.querySelector('.version-tag').textContent = VERSION;
 
     // ═══════════════════════════════════════════════════════
@@ -1738,6 +1751,10 @@
     let username     = null;
     let myIcon       = 'icon1.png';
     let myCoins      = 0;
+    let myLevel      = 1;
+    let myXp         = 0;
+    let myXpIntoLevel = 0;
+    let myXpNeeded   = 100;
     let myOwnedCross  = new Set(['default']);
     let myOwnedCircle = new Set(['default']);
     let myEquippedCross  = 'default';
@@ -1822,11 +1839,15 @@
         myIcon    = data.icon || 'icon1.png';
         if (data.cosmetics) {
             myCoins          = data.stats.coins || 0;
-            myOwnedCross     = new Set((data.cosmetics.owned_cross  || 'default').split(','));
-            myOwnedCircle    = new Set((data.cosmetics.owned_circle || 'default').split(','));
-            myEquippedCross  = data.cosmetics.equipped_cross  || 'default';
-            myEquippedCircle = data.cosmetics.equipped_circle || 'default';
+            myOwnedCross     = new Set((data.cosmetics.owned_cross  || '001').split(','));
+            myOwnedCircle    = new Set((data.cosmetics.owned_circle || '001').split(','));
+            myEquippedCross  = data.cosmetics.equipped_cross  || '001';
+            myEquippedCircle = data.cosmetics.equipped_circle || '001';
         }
+        myLevel       = data.stats.level        || 1;
+        myXp          = data.stats.xp           || 0;
+        myXpIntoLevel = data.stats.xp_into_level || 0;
+        myXpNeeded    = data.stats.xp_needed    || 100;
         localStorage.setItem('tttUser', username);
         localStorage.setItem('tttPass', document.getElementById('password').value);
         dbg(`logged in as ${username}`, 'ok');
@@ -1905,6 +1926,15 @@
         // Update MMR label
         document.getElementById('userMmr').textContent = `${mmr} MMR`;
         document.getElementById('userCoins').textContent = `⬡ ${userStats.coins !== undefined ? userStats.coins : myCoins}`;
+
+        // Level + XP
+        const lvl       = userStats.level        || myLevel;
+        const xpIn      = userStats.xp_into_level !== undefined ? userStats.xp_into_level : myXpIntoLevel;
+        const xpNeeded  = userStats.xp_needed     || myXpNeeded;
+        document.getElementById('userLevelBadge').textContent = lvl >= 100 ? '· MAX' : `· Lv.${lvl}`;
+        document.getElementById('xpLabel').textContent = lvl >= 100 ? 'MAX LEVEL' : `${xpIn} / ${xpNeeded}`;
+        const xpPct = xpNeeded > 0 ? Math.min(100, (xpIn / xpNeeded) * 100) : 100;
+        document.getElementById('xpBarFill').style.width = xpPct + '%';
 
         // ── MMR progress bar with tier floor indicator ──
         const floor = getRankFloor(mmr);
@@ -2124,6 +2154,10 @@
                 if (stats.coins !== undefined) myCoins = stats.coins;
                 if (stats.equipped_cross)  myEquippedCross  = stats.equipped_cross;
                 if (stats.equipped_circle) myEquippedCircle = stats.equipped_circle;
+                if (stats.level !== undefined)        myLevel       = stats.level;
+                if (stats.xp !== undefined)           myXp          = stats.xp;
+                if (stats.xp_into_level !== undefined) myXpIntoLevel = stats.xp_into_level;
+                if (stats.xp_needed !== undefined)    myXpNeeded    = stats.xp_needed;
                 updateStatsDisplay();
             }
 
