@@ -258,6 +258,49 @@ def get_k_factor(rank, total_games):
 
 FLOOR_SHIELDS_MAX = 3  # Number of loss protections granted when landing on a floor
 
+# ── LEVEL SYSTEM ──────────────────────────────────────────────────────────────
+MAX_LEVEL = 100
+
+def xp_for_level(level):
+    return level * 100  # level 1=100xp, level 2=200xp, etc.
+
+def calc_level(total_xp):
+    """Return (level, xp_into_current_level, xp_needed_for_next_level)."""
+    level = 1
+    remaining = total_xp
+    while level < MAX_LEVEL:
+        needed = xp_for_level(level)
+        if remaining < needed:
+            break
+        remaining -= needed
+        level += 1
+    if level >= MAX_LEVEL:
+        return MAX_LEVEL, 0, 0
+    return level, remaining, xp_for_level(level)
+
+def apply_xp(username, xp_gain):
+    """Add XP to user and recalculate level. Returns (total_xp, new_level)."""
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE users SET xp = COALESCE(xp, 0) + %s WHERE username = %s",
+                    (xp_gain, username)
+                )
+                cur.execute("SELECT COALESCE(xp, 0) FROM users WHERE username = %s", (username,))
+                row = cur.fetchone()
+            conn.commit()
+        total_xp = row[0]
+        new_level, _, _ = calc_level(total_xp)
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE users SET level = %s WHERE username = %s", (new_level, username))
+            conn.commit()
+        return total_xp, new_level
+    except Exception as e:
+        print(f"[apply_xp] error: {e}", flush=True)
+        return 0, 1
+
 
 def update_user_stats(username, result, opponent_username=None):
     """
@@ -350,14 +393,13 @@ def update_user_stats(username, result, opponent_username=None):
 
     # Award XP for match result (win=80, loss=20)
     xp_gain = 80 if result == 'win' else 20
-    apply_xp(username, xp_gain)
+    total_xp, level = apply_xp(username, xp_gain)
+    _, xp_into_level, xp_needed = calc_level(total_xp)
 
     user = get_user(username)
-    total_xp = user.get('xp', 0)
-    level, xp_into_level, xp_needed = calc_level(total_xp)
     return {
         'wins': user['wins'], 'losses': user['losses'], 'rank': user['rank'],
-        'coins': user['coins'],
+        'coins': user.get('coins', 0),
         'equipped_cross': user.get('equipped_cross', '001'),
         'equipped_circle': user.get('equipped_circle', '001'),
         'level': level,
@@ -741,17 +783,48 @@ def handle_make_move(data):
         stats_x = stats_o = None
         if game_over and winner:
             game.match_score[winner] += 1
-            # Update both players' stats with opponent info for ELO calculation
-            stats_x = update_user_stats(
-                game.x_username,
-                'win' if winner == 'X' else 'loss',
-                opponent_username=game.o_username
-            )
-            stats_o = update_user_stats(
-                game.o_username,
-                'win' if winner == 'O' else 'loss',
-                opponent_username=game.x_username
-            )
+            match_over = game.match_score['X'] >= MATCH_WINS_NEEDED or game.match_score['O'] >= MATCH_WINS_NEEDED
+            winner_uname = game.x_username if winner == 'X' else game.o_username
+            loser_uname  = game.o_username if winner == 'X' else game.x_username
+
+            if match_over:
+                # Match over: full stats update, ELO, +50/+15 coins, +80/+20 XP
+                stats_x = update_user_stats(
+                    game.x_username, 'win' if winner == 'X' else 'loss',
+                    opponent_username=game.o_username
+                )
+                stats_o = update_user_stats(
+                    game.o_username, 'win' if winner == 'O' else 'loss',
+                    opponent_username=game.x_username
+                )
+            else:
+                # Round over: +20 coins to winner, +30/+10 XP
+                try:
+                    with get_conn() as conn:
+                        with conn.cursor() as cur:
+                            cur.execute(
+                                "UPDATE users SET coins = COALESCE(coins,0) + 20 WHERE username = %s",
+                                (winner_uname,)
+                            )
+                        conn.commit()
+                    wx, wl = apply_xp(winner_uname, 30)
+                    lx, ll = apply_xp(loser_uname,  10)
+                    def mini_stats(uname, total_xp, lvl):
+                        u = get_user(uname)
+                        _, xp_in, xp_need = calc_level(total_xp)
+                        return {
+                            'wins': u['wins'], 'losses': u['losses'], 'rank': u['rank'],
+                            'coins': u.get('coins', 0), 'level': lvl,
+                            'xp': total_xp, 'xp_into_level': xp_in, 'xp_needed': xp_need,
+                        }
+                    if winner == 'X':
+                        stats_x = mini_stats(game.x_username, wx, wl)
+                        stats_o = mini_stats(game.o_username, lx, ll)
+                    else:
+                        stats_x = mini_stats(game.x_username, lx, ll)
+                        stats_o = mini_stats(game.o_username, wx, wl)
+                except Exception as e:
+                    print(f"[round reward] error: {e}", flush=True)
             print(f"[make_move] stats updated x={stats_x} o={stats_o}", flush=True)
 
         payload_base = {'index': index, 'mark': mark, 'removed_index': removed_index,
@@ -765,7 +838,7 @@ def handle_make_move(data):
         # If round ended but match not over, auto-start next round after short delay
         if game_over:
             match_over = game.match_score['X'] >= MATCH_WINS_NEEDED or game.match_score['O'] >= MATCH_WINS_NEEDED
-            if not match_over:
+            if not match_over and winner:
                 socketio.sleep(1.5)
                 _start_next_round(game_id)
             # If match IS over, game stays until players leave/rematch manually
