@@ -439,21 +439,32 @@ class TTTGame:
         self.turn_start_time = time.time()
         # Unique token per turn — used to detect if a move was made before timeout fires
         self.turn_token = str(uuid.uuid4())
+        # Ability state
+        self.energy       = {'X': 0, 'O': 0}
+        self.shielded     = {}   # {cell_index: mark}
+        self.locked_cells = {}   # {cell_index: turns_remaining}
+        self.abilities    = {'X': [], 'O': []}
 
     def make_move(self, index, mark):
         if self.turn != mark or self.board[index] is not None:
             return False, None, False, None, None
+        # Block locked cells
+        if index in self.locked_cells:
+            return False, None, False, None, None
 
-        removed_index = None
         my_pieces = [(m, i) for m, i in self.move_order if m == mark]
 
-        # Step 1: Determine which piece would be removed (the oldest)
+        # Find oldest non-shielded piece to remove
         oldest_index = None
         if len(my_pieces) >= 3:
-            oldest_index = my_pieces[0][1]
+            for _, pi in my_pieces:
+                if pi not in self.shielded:
+                    oldest_index = pi
+                    break
+            if oldest_index is None:
+                oldest_index = my_pieces[0][1]  # all shielded, remove oldest anyway
 
-        # Step 2: Simulate the final board state —
-        # remove oldest, place new piece, then check win
+        # Simulate final board state for win check
         temp_board = self.board[:]
         if oldest_index is not None:
             temp_board[oldest_index] = None
@@ -465,15 +476,24 @@ class TTTGame:
                 win_line = line
                 break
 
-        # Step 3: Apply the changes for real
+        # Apply changes
         if oldest_index is not None:
             self.board[oldest_index] = None
+            self.shielded.pop(oldest_index, None)
             self.move_order = [(m, i) for m, i in self.move_order
                                if not (m == mark and i == oldest_index)]
             removed_index = oldest_index
+        else:
+            removed_index = None
 
         self.board[index] = mark
         self.move_order.append((mark, index))
+
+        # Award energy + tick locked cells
+        self.energy[mark] = min(MAX_ENERGY, self.energy[mark] + ENERGY_PER_MOVE)
+        expired = [c for c, t in self.locked_cells.items() if t <= 1]
+        for c in expired: del self.locked_cells[c]
+        for c in list(self.locked_cells): self.locked_cells[c] -= 1
 
         if win_line:
             return True, removed_index, True, mark, win_line
@@ -492,6 +512,8 @@ class TTTGame:
         self.move_order = []
         self.turn = 'X'
         self.round += 1
+        self.shielded     = {}
+        self.locked_cells = {}
 
     def get_opponent(self, player_id):
         return self.o_player if player_id == self.x_player else self.x_player
@@ -660,12 +682,26 @@ def handle_find_game(data):
         my_circle  = get_skin_file('circle', my_user.get('equipped_circle',  '001') if my_user else '001')
         # X = opp, O = me — send filenames so client loads the right image
         skins = {'x_cross': opp_cross, 'x_circle': opp_circle, 'o_cross': my_cross, 'o_circle': my_circle}
+
+        opp_abs = (opp_user.get('equipped_abilities','cell_lock,shield,erase') or 'cell_lock,shield,erase').split(',')[:3]
+        my_abs  = (my_user.get('equipped_abilities', 'cell_lock,shield,erase') or 'cell_lock,shield,erase').split(',')[:3]
+        game.abilities['X'] = opp_abs
+        game.abilities['O'] = my_abs
+
+        def ab_info(aid):
+            a = ABILITY_CATALOGUE.get(aid, {})
+            return {'id': aid, 'name': a.get('name','?'), 'cost': a.get('cost',99), 'icon': a.get('icon','?'), 'desc': a.get('desc','')}
+
         emit('game_start', {'game_id': game_id, 'mark': 'X', 'first_turn': 'X', 'new_match': True,
                             'opponent_name': username, 'x_player': opp_username, 'o_player': username,
-                            'x_icon': opp_icon, 'o_icon': my_icon, **skins}, room=opp_id)
+                            'x_icon': opp_icon, 'o_icon': my_icon, **skins,
+                            'my_abilities': [ab_info(a) for a in opp_abs],
+                            'energy': 0, 'max_energy': MAX_ENERGY}, room=opp_id)
         emit('game_start', {'game_id': game_id, 'mark': 'O', 'first_turn': 'X', 'new_match': True,
                             'opponent_name': opp_username, 'x_player': opp_username, 'o_player': username,
-                            'x_icon': opp_icon, 'o_icon': my_icon, **skins}, room=player_id)
+                            'x_icon': opp_icon, 'o_icon': my_icon, **skins,
+                            'my_abilities': [ab_info(a) for a in my_abs],
+                            'energy': 0, 'max_energy': MAX_ENERGY}, room=player_id)
         # Start server-side turn timer — X goes first
         socketio.start_background_task(schedule_timeout, game_id, game.turn_token)
     else:
@@ -829,10 +865,12 @@ def handle_make_move(data):
 
         payload_base = {'index': index, 'mark': mark, 'removed_index': removed_index,
                         'game_over': game_over, 'winner': winner,
-                        'win_line': list(win_line) if win_line else None}
+                        'win_line': list(win_line) if win_line else None,
+                        'locked_cells':   list(game.locked_cells.keys()),
+                        'shielded_cells': list(game.shielded.keys())}
 
-        emit('move_made', {**payload_base, 'stats': stats_x}, room=game.x_player)
-        emit('move_made', {**payload_base, 'stats': stats_o}, room=game.o_player)
+        emit('move_made', {**payload_base, 'stats': stats_x, 'my_energy': game.energy.get('X',0)}, room=game.x_player)
+        emit('move_made', {**payload_base, 'stats': stats_o, 'my_energy': game.energy.get('O',0)}, room=game.o_player)
         print(f"[make_move] emitted OK", flush=True)
 
         # If round ended but match not over, auto-start next round after short delay
@@ -885,17 +923,28 @@ def _start_next_round(game_id):
         'o_cross':  get_skin_file('cross',  ou.get('equipped_cross',  '001') if ou else '001'),
         'o_circle': get_skin_file('circle', ou.get('equipped_circle', '001') if ou else '001'),
     }
+    def ab_info_nr(aid):
+        a = ABILITY_CATALOGUE.get(aid, {})
+        return {'id': aid, 'name': a.get('name','?'), 'cost': a.get('cost',99), 'icon': a.get('icon','?'), 'desc': a.get('desc','')}
+
+    x_abs = new_game.abilities.get('X', ['cell_lock','shield','erase'])
+    o_abs = new_game.abilities.get('O', ['cell_lock','shield','erase'])
+
     socketio.emit('rematch_start', {
         'game_id': new_game_id, 'mark': 'X', 'first_turn': first, 'new_match': False,
         'opponent_name': game.o_username, 'x_player': game.x_username, 'o_player': game.o_username,
-        **nr_skins
+        **nr_skins,
+        'my_abilities': [ab_info_nr(a) for a in x_abs],
+        'energy': new_game.energy.get('X', 0), 'max_energy': MAX_ENERGY,
     }, room=game.x_player, namespace='/')
 
     print(f"[next_round] emitting to O sid={game.o_player}", flush=True)
     socketio.emit('rematch_start', {
         'game_id': new_game_id, 'mark': 'O', 'first_turn': first, 'new_match': False,
         'opponent_name': game.x_username, 'x_player': game.x_username, 'o_player': game.o_username,
-        **nr_skins
+        **nr_skins,
+        'my_abilities': [ab_info_nr(a) for a in o_abs],
+        'energy': new_game.energy.get('O', 0), 'max_energy': MAX_ENERGY,
     }, room=game.o_player, namespace='/')
 
     del games[game_id]
@@ -1246,6 +1295,105 @@ def handle_buy_skin(data):
         'owned_cross':  user.get('owned_cross', '001'),
         'owned_circle': user.get('owned_circle', '001'),
     })
+
+
+@socketio.on('use_ability')
+def handle_use_ability(data):
+    player_id = request.sid
+    if player_id not in active_sessions: return
+    game_id    = data.get('game_id')
+    ability_id = data.get('ability_id', '')
+    targets    = data.get('targets', [])
+
+    if game_id not in games:
+        emit('ability_error', {'message': 'Game not found'}); return
+    game = games[game_id]
+    mark = 'X' if game.x_player == player_id else 'O' if game.o_player == player_id else None
+    if not mark: emit('ability_error', {'message': 'Not in this game'}); return
+    if game.turn != mark: emit('ability_error', {'message': 'Not your turn'}); return
+    if ability_id not in ABILITY_CATALOGUE: emit('ability_error', {'message': 'Unknown ability'}); return
+
+    ability = ABILITY_CATALOGUE[ability_id]
+    cost = ability['cost']
+    if game.energy.get(mark, 0) < cost:
+        emit('ability_error', {'message': f"Need {cost} energy (have {game.energy.get(mark,0)})"}); return
+    if ability_id not in game.abilities.get(mark, []):
+        emit('ability_error', {'message': 'Not equipped'}); return
+
+    result_data = {}
+    try:
+        if ability_id == 'cell_lock':
+            if len(targets) != 1: emit('ability_error', {'message': 'Pick a cell'}); return
+            t = targets[0]
+            if not (0 <= t <= 8): emit('ability_error', {'message': 'Invalid cell'}); return
+            if game.board[t] is not None: emit('ability_error', {'message': 'Cell occupied'}); return
+            game.locked_cells[t] = 2
+            result_data = {'locked_cell': t}
+
+        elif ability_id == 'shield':
+            if len(targets) != 1: emit('ability_error', {'message': 'Pick your piece'}); return
+            t = targets[0]
+            if game.board[t] != mark: emit('ability_error', {'message': 'Pick your own piece'}); return
+            game.shielded[t] = mark
+            result_data = {'shielded_cell': t}
+
+        elif ability_id == 'swap':
+            if len(targets) != 2: emit('ability_error', {'message': 'Pick two pieces'}); return
+            a, b = targets[0], targets[1]
+            if game.board[a] is None or game.board[b] is None:
+                emit('ability_error', {'message': 'Both cells need pieces'}); return
+            if game.board[a] == game.board[b]:
+                emit('ability_error', {'message': 'Cannot swap same type'}); return
+            game.board[a], game.board[b] = game.board[b], game.board[a]
+            game.move_order = [
+                (game.board[i] if i in (a,b) else m, i) for m,i in game.move_order
+            ]
+            if a in game.shielded: game.shielded[a] = game.board[a]
+            if b in game.shielded: game.shielded[b] = game.board[b]
+            win_after = win_line_after = None
+            for line in WIN_LINES:
+                vals = [game.board[i] for i in line]
+                if vals[0] and vals[0] == vals[1] == vals[2]:
+                    win_after = vals[0]; win_line_after = line; break
+            result_data = {'swap': [a,b], 'board': game.board[:], 'winner': win_after, 'win_line': win_line_after}
+
+        elif ability_id == 'erase':
+            if len(targets) != 1: emit('ability_error', {'message': 'Pick opponent piece'}); return
+            t = targets[0]
+            opp = 'O' if mark == 'X' else 'X'
+            if game.board[t] != opp: emit('ability_error', {'message': "Pick opponent's piece"}); return
+            game.board[t] = None
+            game.move_order = [(m,i) for m,i in game.move_order if i != t]
+            game.shielded.pop(t, None)
+            result_data = {'erased_cell': t}
+
+    except Exception as e:
+        print(f"[use_ability] {e}", flush=True)
+        emit('ability_error', {'message': 'Server error'}); return
+
+    game.energy[mark] = max(0, game.energy[mark] - cost)
+
+    base = {'ability_id': ability_id, 'used_by': mark, 'targets': targets,
+            'locked_cells': list(game.locked_cells.keys()),
+            'shielded_cells': list(game.shielded.keys()), **result_data}
+    emit('ability_used', {**base, 'my_energy': game.energy['X']}, room=game.x_player)
+    emit('ability_used', {**base, 'my_energy': game.energy['O']}, room=game.o_player)
+
+    if ability_id == 'swap' and result_data.get('winner'):
+        w = result_data['winner']
+        game.match_score[w] += 1
+        match_over = game.match_score['X'] >= MATCH_WINS_NEEDED or game.match_score['O'] >= MATCH_WINS_NEEDED
+        sx = update_user_stats(game.x_username,'win' if w=='X' else 'loss',opponent_username=game.o_username) if match_over else None
+        so = update_user_stats(game.o_username,'win' if w=='O' else 'loss',opponent_username=game.x_username) if match_over else None
+        for sid, st, eg in [(game.x_player,sx,game.energy['X']),(game.o_player,so,game.energy['O'])]:
+            socketio.emit('move_made', {
+                'index': None, 'mark': None, 'removed_index': None,
+                'game_over': True, 'winner': w, 'win_line': result_data.get('win_line'),
+                'locked_cells': [], 'shielded_cells': [], 'stats': st, 'my_energy': eg
+            }, room=sid, namespace='/')
+        if not match_over:
+            socketio.sleep(1.5)
+            _start_next_round(game_id)
 
 
 @socketio.on('equip_skin')

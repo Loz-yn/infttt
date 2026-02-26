@@ -1198,6 +1198,50 @@
 
         .skin-card.super-card { border-color: rgba(212,168,67,0.3); }
         .skin-card.super-card:hover { border-color: var(--accent); }
+
+        /* ── ABILITY SYSTEM ── */
+        .ability-bar { margin-top: 14px; width: 100%; }
+
+        .energy-row {
+            display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
+        }
+        .energy-label { font-size: 10px; letter-spacing: 2px; color: var(--muted); }
+        .energy-pips  { display: flex; gap: 4px; flex: 1; }
+        .energy-pip   { flex: 1; height: 6px; border-radius: 99px; background: var(--border); transition: background 0.2s; }
+        .energy-pip.filled { background: var(--accent); }
+        .energy-count { font-size: 11px; color: var(--accent); min-width: 28px; text-align: right; }
+
+        .ability-slots { display: flex; gap: 8px; }
+        .ability-slot {
+            flex: 1; background: var(--surface); border: 1px solid var(--border);
+            border-radius: 10px; padding: 10px 8px; cursor: pointer;
+            transition: border-color 0.15s, background 0.15s, transform 0.1s;
+            display: flex; flex-direction: column; align-items: center; gap: 4px;
+            position: relative; user-select: none;
+        }
+        .ability-slot.ready { border-color: var(--accent); }
+        .ability-slot.ready:hover { background: rgba(212,168,67,0.08); transform: translateY(-2px); }
+        .ability-slot.targeting {
+            border-color: var(--accent); background: rgba(212,168,67,0.12);
+            animation: ability-pulse 1s ease-in-out infinite;
+        }
+        .ability-slot.disabled { opacity: 0.4; cursor: default; }
+        @keyframes ability-pulse {
+            0%,100% { box-shadow: 0 0 0 0 rgba(212,168,67,0); }
+            50%      { box-shadow: 0 0 0 4px rgba(212,168,67,0.2); }
+        }
+        .ability-icon { font-size: 20px; line-height: 1; }
+        .ability-name { font-size: 9px; letter-spacing: 1px; text-transform: uppercase; color: var(--text); text-align: center; }
+        .ability-cost { font-size: 10px; color: var(--accent); letter-spacing: 1px; }
+        .ability-cost.unaffordable { color: var(--muted); }
+        .ability-hint { font-size: 11px; color: var(--accent); text-align: center; margin-top: 8px; min-height: 16px; letter-spacing: 1px; }
+
+        .cell.ability-target-valid   { outline: 2px solid var(--accent); outline-offset: -2px; cursor: crosshair !important; }
+        .cell.ability-target-selected { outline: 2px solid #fff; outline-offset: -2px; }
+        .cell.ability-locked   { position: relative; }
+        .cell.ability-locked::after   { content:'🔒'; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); font-size:18px; pointer-events:none; }
+        .cell.ability-shielded { position: relative; }
+        .cell.ability-shielded::before { content:'🛡️'; position:absolute; top:2px; right:2px; font-size:12px; pointer-events:none; }
         /* ── RANK LADDER MODAL ── */
         #rankModal {
             display: none;
@@ -1493,6 +1537,16 @@
                     <div class="legend-item"><div class="legend-dot solid"></div> Active piece</div>
                     <div class="legend-item"><div class="legend-dot faded"></div> Disappears next turn</div>
                 </div>
+                <!-- Ability Bar -->
+                <div class="ability-bar" id="abilityBar" style="display:none;">
+                    <div class="energy-row">
+                        <span class="energy-label">ENERGY</span>
+                        <div class="energy-pips" id="energyPips"></div>
+                        <span class="energy-count" id="energyCount">0/6</span>
+                    </div>
+                    <div class="ability-slots" id="abilitySlots"></div>
+                    <div class="ability-hint" id="abilityHint"></div>
+                </div>
             </div>
 
             <!-- Chat -->
@@ -1624,7 +1678,7 @@
     // ═══════════════════════════════════════════════════════
     //  DEBUG CONSOLE
     // ═══════════════════════════════════════════════════════
-    const VERSION = 'v3.37/Alpha - Level System';
+    const VERSION = 'v3.9/Post-Alpha - Skills';
     document.querySelector('.version-tag').textContent = VERSION;
 
     // ═══════════════════════════════════════════════════════
@@ -1750,6 +1804,13 @@
     let myMark       = null;
     let username     = null;
     let myIcon       = 'icon1.png';
+    // Expose to ability module
+    function syncAbilityGlobals() {
+        window._gameBoard    = board;
+        window._myMark       = myMark;
+        window._gameId       = gameId;
+        window._opponentName = opponentName;
+    }
     let myCoins      = 0;
     let myLevel      = 1;
     let myXp         = 0;
@@ -2009,6 +2070,8 @@
         updateStatus();
         startTimer();
         playSound('gamestart');
+        syncAbilityGlobals();
+        if (window._initAbilities) window._initAbilities(data);
         addSysMsg(`Round ${roundNumber} — You are ${myMark}. ${isMyTurn ? 'You go first!' : `${opponentName} goes first.`}`);
         dbg(`game started — I am ${myMark}, my turn: ${isMyTurn}`, 'ok');
         dbgUpdateState();
@@ -2040,8 +2103,13 @@
     //  CLICK — optimistic render + send to server
     // ═══════════════════════════════════════════════════════
     function handleCellClick(index) {
-        if (!gameId)     { dbg('click ignored: no gameId', 'warn'); return; }
-        if (!isMyTurn)   { dbg(`click ignored: not my turn (cell ${index})`, 'warn'); return; }
+        if (!gameId)   { dbg('click ignored: no gameId', 'warn'); return; }
+        // Ability targeting mode takes priority
+        if (window._isAbilityTargeting && window._isAbilityTargeting()) {
+            window.handleAbilityCellClick && window.handleAbilityCellClick(index);
+            return;
+        }
+        if (!isMyTurn) { dbg(`click ignored: not my turn (cell ${index})`, 'warn'); return; }
         if (board[index]){ dbg(`click ignored: cell ${index} occupied`, 'warn'); return; }
 
         dbg(`clicking cell ${index}`, 'move');
@@ -2076,6 +2144,23 @@
     // ═══════════════════════════════════════════════════════
     //  SERVER MOVE — updates board[] and moveOrder[] state
     // ═══════════════════════════════════════════════════════
+    window._syncBoardFromAbility = function(newBoard) {
+        // Sync internal board state after a swap ability
+        newBoard.forEach((mark, i) => {
+            if (mark) {
+                board[i] = { mark };
+            } else {
+                board[i] = null;
+            }
+        });
+        // Rebuild move_order from board
+        moveOrder = [];
+        newBoard.forEach((mark, i) => { if (mark) moveOrder.push({ mark, index: i }); });
+    };
+    window._eraseCellFromBoard = function(idx) {
+        board[idx] = null;
+        moveOrder = moveOrder.filter(m => m.index !== idx);
+    };
     function applyServerMove(index, mark, forceRender = false) {
         dbg(`applyServerMove: mark=${mark} index=${index}`, 'move');
         dbg(`  before: order=[${moveOrder.map(m=>m.mark+'@'+m.index).join(',')}]`, 'info');
@@ -2143,6 +2228,13 @@
         if (index !== null && index !== undefined) {
             applyServerMove(index, mark, Boolean(timeout));
         }
+        if (data.my_energy !== undefined && window._updateEnergyFromMove) {
+            window._updateEnergyFromMove(data.my_energy);
+        }
+        if (window._updateLockedShielded) {
+            window._updateLockedShielded(data.locked_cells, data.shielded_cells);
+        }
+        syncAbilityGlobals();
 
         if (game_over) {
             dbg(`GAME OVER — winner=${winner} line=${JSON.stringify(win_line)}`, 'ok');
@@ -2193,6 +2285,7 @@
     // ═══════════════════════════════════════════════════════
     //  RENDERING HELPERS
     // ═══════════════════════════════════════════════════════
+    window.getSkinSrc = function(mark, pieceType) { return getSkinSrc(mark, pieceType); };
     function getSkinSrc(mark, pieceType) {
         const key = mark.toLowerCase() + '_' + pieceType;
         const skin = gameSkins[key] || 'default';
@@ -2375,7 +2468,8 @@
         resetBoardDOM();
         updateStatus();
         startTimer();
-        playSound('gamestart');
+        syncAbilityGlobals();
+        if (window._initAbilities) window._initAbilities(data);
         addSysMsg(`⚡ Round ${roundNumber} — You are ${myMark}. ${isMyTurn ? 'You go first!' : `${opponentName} goes first.`}`);
         dbg(`round ${roundNumber} started — I am ${myMark}, my turn: ${isMyTurn}`, 'ok');
         dbgUpdateState();
@@ -2402,6 +2496,7 @@
         document.getElementById('headerBtns').querySelectorAll('.btn').forEach(b => b.style.display = '');
         document.getElementById('userRankIcon').style.cursor = 'pointer';
         document.getElementById('userRankIcon').title = 'Click to view all ranks';
+        if (window._abilityBarReset) window._abilityBarReset();
         document.getElementById('gameLayout').classList.remove('show');
         document.getElementById('playersBar').classList.remove('show');
         document.getElementById('matchBar').classList.remove('show');
@@ -2493,6 +2588,7 @@
         wrap.scrollTop = wrap.scrollHeight;
     }
 
+    window._addSysMsg = (text) => addSysMsg(text);
     function addSysMsg(text) {
         const wrap = document.getElementById('chatMessages');
         const div  = document.createElement('div');
@@ -2907,4 +3003,231 @@
 
 
 </body>
-</html>
+</html><script>
+// ═══════════════════════════════════════════════════════
+//  ABILITY SYSTEM
+// ═══════════════════════════════════════════════════════
+(function() {
+
+let myAbilities      = [];   // [{id, name, cost, icon, desc}]
+let myEnergy         = 0;
+let maxEnergy        = 6;
+let activeAbility    = null; // ability currently being targeted
+let targetingTargets = [];   // cells selected so far
+let lockedCells      = [];
+let shieldedCells    = [];
+
+// ── Initialise ability bar from game_start / rematch_start ──
+function initAbilities(data) {
+    myAbilities = data.my_abilities || [];
+    myEnergy    = data.energy || 0;
+    maxEnergy   = data.max_energy || 6;
+    lockedCells  = [];
+    shieldedCells = [];
+    cancelAbilityTargeting();
+    renderAbilityBar();
+    document.getElementById('abilityBar').style.display = myAbilities.length ? '' : 'none';
+}
+
+// ── Render energy pips + slots ──
+function renderAbilityBar() {
+    // Energy pips
+    const pips = document.getElementById('energyPips');
+    pips.innerHTML = '';
+    for (let i = 0; i < maxEnergy; i++) {
+        const pip = document.createElement('div');
+        pip.className = 'energy-pip' + (i < myEnergy ? ' filled' : '');
+        pips.appendChild(pip);
+    }
+    document.getElementById('energyCount').textContent = `${myEnergy}/${maxEnergy}`;
+
+    // Ability slots
+    const slots = document.getElementById('abilitySlots');
+    slots.innerHTML = '';
+    myAbilities.forEach(ab => {
+        const canAfford = myEnergy >= ab.cost;
+        const isTargeting = activeAbility && activeAbility.id === ab.id;
+        const slot = document.createElement('div');
+        slot.className = 'ability-slot' +
+            (isTargeting ? ' targeting' : canAfford ? ' ready' : ' disabled');
+        slot.title = ab.desc;
+        slot.innerHTML = `
+            <span class="ability-icon">${ab.icon}</span>
+            <span class="ability-name">${ab.name}</span>
+            <span class="ability-cost ${canAfford ? '' : 'unaffordable'}">⚡${ab.cost}</span>`;
+        if (!isTargeting && canAfford) {
+            slot.onclick = () => startAbilityTargeting(ab);
+        } else if (isTargeting) {
+            slot.onclick = () => cancelAbilityTargeting();
+        }
+        slots.appendChild(slot);
+    });
+}
+
+// ── Start targeting mode ──
+function startAbilityTargeting(ab) {
+    activeAbility    = ab;
+    targetingTargets = [];
+    document.getElementById('abilityHint').textContent = getTargetHint(ab);
+    renderAbilityBar();
+    highlightValidTargets();
+}
+
+function getTargetHint(ab) {
+    if (ab.id === 'cell_lock')  return 'Select an empty cell to lock';
+    if (ab.id === 'shield')     return 'Select your piece to shield';
+    if (ab.id === 'swap')       return targetingTargets.length === 0 ? 'Select first piece to swap' : 'Select second piece to swap';
+    if (ab.id === 'erase')      return "Select an opponent's piece to erase";
+    return 'Select target';
+}
+
+function highlightValidTargets() {
+    // Uses the global board and myMark from main script
+    const b = window._gameBoard || [];
+    const mark = window._myMark;
+    document.querySelectorAll('.cell').forEach(cell => {
+        const idx = parseInt(cell.dataset.index);
+        cell.classList.remove('ability-target-valid', 'ability-target-selected');
+        if (!activeAbility) return;
+        if (targetingTargets.includes(idx)) {
+            cell.classList.add('ability-target-selected');
+            return;
+        }
+        let valid = false;
+        if (activeAbility.id === 'cell_lock')  valid = b[idx] === null && !lockedCells.includes(idx);
+        if (activeAbility.id === 'shield')     valid = b[idx] !== null && b[idx].mark === mark;
+        if (activeAbility.id === 'erase')      valid = b[idx] !== null && b[idx].mark !== mark;
+        if (activeAbility.id === 'swap') {
+            if (targetingTargets.length === 0)  valid = b[idx] !== null;
+            else {
+                const firstMark = b[targetingTargets[0]] ? b[targetingTargets[0]].mark : null;
+                valid = b[idx] !== null && b[idx].mark !== firstMark && idx !== targetingTargets[0];
+            }
+        }
+        if (valid) cell.classList.add('ability-target-valid');
+    });
+}
+
+function cancelAbilityTargeting() {
+    activeAbility    = null;
+    targetingTargets = [];
+    document.querySelectorAll('.cell').forEach(c => {
+        c.classList.remove('ability-target-valid', 'ability-target-selected');
+    });
+    const hint = document.getElementById('abilityHint');
+    if (hint) hint.textContent = '';
+    renderAbilityBar();
+}
+
+// ── Called from cell click handler ──
+window.handleAbilityCellClick = function(index) {
+    if (!activeAbility) return false; // not in targeting mode
+    const cell = document.querySelector(`.cell[data-index="${index}"]`);
+    if (!cell || !cell.classList.contains('ability-target-valid')) return false;
+
+    targetingTargets.push(index);
+    cell.classList.remove('ability-target-valid');
+    cell.classList.add('ability-target-selected');
+
+    const needsTwo = activeAbility.id === 'swap';
+    if (!needsTwo || targetingTargets.length === 2) {
+        // Fire ability
+        const gid = window._gameId;
+        socket.emit('use_ability', {
+            game_id:    gid,
+            ability_id: activeAbility.id,
+            targets:    targetingTargets,
+        });
+        cancelAbilityTargeting();
+    } else {
+        // Swap: waiting for second target
+        document.getElementById('abilityHint').textContent = getTargetHint(activeAbility);
+        highlightValidTargets();
+    }
+    return true; // consumed the click
+};
+
+// ── Socket: ability_used ──
+socket.on('ability_used', data => {
+    myEnergy     = data.my_energy;
+    lockedCells  = data.locked_cells  || [];
+    shieldedCells = data.shielded_cells || [];
+
+    // Update board visuals
+    updateBoardOverlays();
+
+    // Apply board changes for swap / erase
+    if (data.ability_id === 'swap' && data.board) {
+        data.board.forEach((mark, i) => {
+            const cell = document.querySelector(`.cell[data-index="${i}"]`);
+            if (!cell) return;
+            if (mark) {
+                cell.classList.add('taken');
+                const pieceType = mark === 'X' ? 'cross' : 'circle';
+                const span = cell.querySelector('.piece') || document.createElement('span');
+                span.className = `piece ${mark.toLowerCase()}`;
+                const img = document.createElement('img');
+                img.src = window.getSkinSrc ? window.getSkinSrc(mark, pieceType) : `/static/piece/${pieceType}/default.png`;
+                img.style.cssText = 'width:65%;height:65%;object-fit:contain;display:block;margin:auto;';
+                img.onerror = () => { img.remove(); span.textContent = mark; };
+                span.innerHTML = ''; span.appendChild(img);
+                cell.innerHTML = ''; cell.appendChild(span);
+            } else {
+                cell.innerHTML = ''; cell.className = 'cell';
+            }
+        });
+        // Sync internal board state
+        if (window._syncBoardFromAbility) window._syncBoardFromAbility(data.board);
+    }
+
+    if (data.ability_id === 'erase' && data.erased_cell !== undefined) {
+        const cell = document.querySelector(`.cell[data-index="${data.erased_cell}"]`);
+        if (cell) { cell.innerHTML = ''; cell.className = 'cell'; }
+        if (window._eraseCellFromBoard) window._eraseCellFromBoard(data.erased_cell);
+    }
+
+    // Flash message
+    const who = data.used_by === window._myMark ? 'You' : window._opponentName || 'Opponent';
+    const abilityNames = {cell_lock:'Cell Lock',shield:'Shield',swap:'Swap',erase:'Erase'};
+    window._addSysMsg && window._addSysMsg(`⚡ ${who} used ${abilityNames[data.ability_id] || data.ability_id}`);
+
+    renderAbilityBar();
+    updateBoardOverlays();
+});
+
+socket.on('ability_error', data => {
+    const hint = document.getElementById('abilityHint');
+    if (hint) hint.textContent = data.message;
+    cancelAbilityTargeting();
+});
+
+function updateBoardOverlays() {
+    document.querySelectorAll('.cell').forEach(cell => {
+        const idx = parseInt(cell.dataset.index);
+        cell.classList.toggle('ability-locked',   lockedCells.includes(idx));
+        cell.classList.toggle('ability-shielded', shieldedCells.includes(idx));
+    });
+}
+
+// ── Expose to main script ──
+window._initAbilities         = initAbilities;
+window._cancelAbilityTargeting = cancelAbilityTargeting;
+window._updateEnergyFromMove   = function(energy) {
+    myEnergy = energy;
+    renderAbilityBar();
+};
+window._updateLockedShielded  = function(locked, shielded) {
+    lockedCells   = locked   || [];
+    shieldedCells = shielded || [];
+    updateBoardOverlays();
+};
+window._isAbilityTargeting    = function() { return !!activeAbility; };
+window._abilityBarReset       = function() {
+    myAbilities = []; myEnergy = 0; activeAbility = null;
+    targetingTargets = []; lockedCells = []; shieldedCells = [];
+    const bar = document.getElementById('abilityBar');
+    if (bar) bar.style.display = 'none';
+};
+
+})();
+</script>
